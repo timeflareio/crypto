@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 )
 
-// Recipient detection hints (docs/spec.md "Recipient Discovery — Detection
+// Recipient detection hints (chain repo docs/spec.md, "Recipient Discovery — Detection
 // Hints"). A secret carries a fresh X25519 ephemeral public key R and an
 // 8-byte tag over the Diffie–Hellman shared value; only the holder of the
 // recipient's PRIVATE key can recompute the tag, so no observer can link
