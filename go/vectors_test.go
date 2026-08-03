@@ -24,14 +24,14 @@ import (
 // Vectors are append-only. The generator below remains for local iteration
 // when ADDING cases:
 //
-//	TIMEFLARE_GENERATE_VECTORS=1 go test . -run TestGenerateVectors
+//	TIMEFLARE_GENERATE_VECTORS=1 go test ./go/ -run TestGenerateVectors
 //
 // It writes into the vendored copy, so `make vectors-verify` will fail against
 // the pinned manifest until the same addition lands in the chain repo and
 // VECTORS_VERSION is bumped — that failure is the mechanism working, not a
 // defect. Verify the Rust side too: cd rust && cargo test vectors
 
-const vectorsDir = "vectors"
+const vectorsDir = "../vectors"
 
 type hmacVector struct {
 	Name            string `json:"name"`

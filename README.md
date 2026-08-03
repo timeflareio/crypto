@@ -6,8 +6,12 @@ byte-identical by a shared vector corpus.
 
 | Implementation | Path | Consumed by |
 |---|---|---|
-| Pure Go (no cgo) | repository root | the chain and the guardian, as `github.com/timeflareio/crypto` |
+| Pure Go (no cgo) | `go/` | the chain and the guardian, as `github.com/timeflareio/crypto/go` |
 | Rust → WASM | `rust/` | the TypeScript SDK, and through it the mobile client |
+
+The corpus that holds the two in agreement is in `vectors/`. `go.mod` sits at the
+repository root rather than in `go/`, so one plain `vX.Y.Z` tag serves both the
+Go module and the WASM asset, and `go test ./...` works from the root.
 
 Primitives: HMAC derivation, unified asymmetric encryption (X25519 +
 ChaCha20-Poly1305), Shamir Secret Sharing, detection hints, rebate commitments.
@@ -39,10 +43,16 @@ Running only one suite proves nothing about drift. `make test` runs both.
 
 ## Consuming this module
 
-**Go** — an ordinary pinned require:
+**Go** — an ordinary pinned require. The import path carries the `/go`
+subdirectory; the package is still named `crypto`, so an explicit alias reads
+best:
 
 ```sh
-go get github.com/timeflareio/crypto@v0.0.1
+go get github.com/timeflareio/crypto/go@v0.0.1
+```
+
+```go
+import crypto "github.com/timeflareio/crypto/go"
 ```
 
 While this repository is private, consumers need `GOPRIVATE=github.com/timeflareio/*`
