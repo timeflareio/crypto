@@ -1,11 +1,17 @@
 # timeflare crypto — Makefile
 #
-# Two implementations of one set of primitives live here: the pure-Go module at
-# the repository root (consumed by the chain and the guardian, no cgo) and the
-# Rust crate in rust/ (compiled to WASM for the TypeScript SDK). They are NOT
-# allowed to drift, and nothing in this repo prevents drift by construction —
-# what prevents it is that both suites assert the same vendored vector corpus,
-# so `make test` fails on the side that changed. Keep it that way.
+# Two implementations of one set of primitives live here: pure Go in go/
+# (consumed by the chain and the guardian, no cgo) and Rust in rust/ (compiled
+# to WASM for the TypeScript SDK), with the corpus that holds them together in
+# vectors/. They are NOT allowed to drift, and nothing in this repo prevents
+# drift by construction — what prevents it is that both suites assert the same
+# vendored vector corpus, so `make test` fails on the side that changed. Keep it
+# that way.
+#
+# go.mod stays at the repository root deliberately, even though the sources sit
+# in go/: that keeps one plain vX.Y.Z tag line serving both the Go module and
+# the WASM asset, and keeps `go test ./...` working from here. The import path
+# is github.com/timeflareio/crypto/go.
 
 .DEFAULT_GOAL := help
 

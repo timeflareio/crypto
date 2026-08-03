@@ -8,26 +8,62 @@ code in this repository.
 **timeflare crypto** holds the protocol's cryptographic primitives in two
 implementations:
 
-- **Pure-Go module at the repository root** — consumed by the chain and the
-  guardian as `github.com/timeflareio/crypto`. No cgo, deliberately: the chain
-  needs deterministic, statically-linked builds.
-- **Rust crate in `rust/`** — compiled to WASM for the TypeScript SDK, which
-  cannot use the Go implementation.
+- **`go/`** — pure Go, consumed by the chain and the guardian. Imported as
+  `github.com/timeflareio/crypto/go`. No cgo, deliberately: the chain needs
+  deterministic, statically-linked builds, and cgo inside consensus code is a
+  fork/halt risk (see `docs/planning/done/DONE_CONSENSUS_CRYPTO_PURE_GO_PLAN.md`).
+- **`rust/`** — compiled to WASM for the TypeScript SDK, which cannot use the
+  Go implementation.
+- **`vectors/`** — the corpus that holds the two in agreement.
 
-Both implement the same primitives: HMAC derivation, unified asymmetric
-encryption (X25519 + ChaCha20-Poly1305), Shamir Secret Sharing, detection
-hints and rebate commitments.
+`go.mod` sits at the repository root rather than in `go/`, so one plain
+`vX.Y.Z` tag serves both the Go module and the WASM asset, and `go test ./...`
+works from the root.
 
-## 🚨 The two implementations must never drift
+## 🚨 A change to one implementation MUST land in the other
+
+This is the single most important rule in this repository.
 
 Two implementations of one concern is normally a defect. This one is forced —
-the mobile and browser runtimes cannot execute the Go path — so it is allowed
-to exist *only* because it is pinned mechanically:
+the browser and mobile runtimes cannot execute the Go path, and the chain cannot
+take a cgo dependency — so it is allowed to exist *only* because it is pinned
+mechanically rather than by good intentions.
 
-**Both suites assert the same vendored vector corpus in `vectors/`.** If either
-side changes behaviour by a single byte, `make test` fails on the side that
-changed. Never weaken this. Never let one suite assert vectors the other does
-not, and never make a primitive change in one language without the other.
+**The rule**: if you change what a shared primitive produces, accepts or
+rejects in `go/`, the same change lands in `rust/` in the same PR, and vice
+versa. Not a follow-up. Not an issue. The same PR. A PR that changes one side
+alone is incomplete by definition, and `make test` is what proves you did both.
+
+### Which primitives are shared
+
+Not everything here is dual-implemented, and pretending otherwise would make
+the rule easy to dismiss. **The corpus is the definition**: a primitive is
+shared if and only if it has a vector file.
+
+| Vector file | Shared primitive | Go | Rust |
+|---|---|---|---|
+| `hmac.json` | share HMAC derivation | ✅ | ✅ |
+| `encryption.json` | X25519 + ChaCha20-Poly1305 envelope | ✅ | ✅ |
+| `low_order_keys.json` | small-order public key rejection | ✅ | ✅ |
+| `detection_hint.json` | detection tag derivation | ✅ | ✅ |
+| `rebate_commitment.json` | commit–reveal arithmetic | ✅ | ✅ |
+
+Shamir Secret Sharing, seal/unseal orchestration and hint scanning are
+**Rust-only** — the chain never needs them and the guardian holds a single
+share and never combines. Changing those needs no Go counterpart. If you find
+yourself adding a Go counterpart for one of them, stop: that is a new shared
+primitive, which needs a vector file and the owner's approval first.
+
+### What this means in practice
+
+- **Adding a shared primitive**: implement both sides, add a vector file, and
+  assert it from both suites. One-sided is not landable.
+- **Changing a shared primitive's output**: this is a protocol change — see the
+  next section. It is not an implementation detail.
+- **Refactoring one side**: allowed alone, provided output is unchanged and
+  `make test` proves it.
+- **Never** let one suite assert a vector the other ignores. That is drift with
+  a green build, which is worse than drift with a red one.
 
 The corpus is **owned by `timeflareio/chain`** (`testdata/vectors/`). This repo
 vendors a pinned copy of the files its suites assert, refreshed only by
