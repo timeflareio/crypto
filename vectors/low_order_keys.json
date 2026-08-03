@@ -1,0 +1,70 @@
+{
+  "description": "Hostile-input corpus: X25519 public keys that BOTH implementations must reject. Unlike the other vector files, which pin agreement on valid inputs, this one pins agreement on rejection — the gap that let the low-order defect exist, where Go's curve25519.X25519 errored while Rust's x25519-dalek silently returned an all-zero shared secret. An exchange against any key below yields an all-zero shared secret, making every derived key publicly computable. Consumed by crypto/vectors_test.go (Go) and rust/src/crypto.rs + rust/src/detect.rs (Rust). Append-only.",
+  "reference": "docs/spec.md 'Common Attack Vectors', Small-Order Key Registration; docs/planning/done/DONE_LOW_ORDER_KEY_VALIDATION_PLAN.md",
+  "source": "libsodium has_small_order() table (crypto_scalarmult/curve25519/ref10). Five canonical u-encodings plus two non-canonical ones that reduce to small-order points; the non-canonical pair is why both implementations delegate to their curve library rather than comparing against a table.",
+  "all_zero_shared_secret_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "reject": [
+    {
+      "name": "identity-all-zeros",
+      "key_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "order": 1,
+      "canonical": true,
+      "note": "The only one the pre-fix chain rejected, and only because an explicit all-zeros check happened to exist."
+    },
+    {
+      "name": "u-equals-one",
+      "key_hex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "order": 4,
+      "canonical": true
+    },
+    {
+      "name": "order-8-a",
+      "key_hex": "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800",
+      "order": 8,
+      "canonical": true
+    },
+    {
+      "name": "order-8-b",
+      "key_hex": "5f9c95bca3508c24b1d0b1559c83ef5b04445cc4581c8e86d8224eddd09f1157",
+      "order": 8,
+      "canonical": true
+    },
+    {
+      "name": "p-minus-1",
+      "key_hex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "order": 2,
+      "canonical": true
+    },
+    {
+      "name": "p-non-canonical-zero",
+      "key_hex": "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "order": 4,
+      "canonical": false,
+      "note": "Reduces to 0 mod p. A hand-maintained blacklist has to remember this one; delegating to the curve library gets it for free."
+    },
+    {
+      "name": "p-plus-1-non-canonical-one",
+      "key_hex": "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "order": 1,
+      "canonical": false,
+      "note": "Reduces to 1 mod p."
+    }
+  ],
+  "accept": [
+    {
+      "name": "ordinary-public-key",
+      "key_hex": "d89e3bad79437dbed9f843418304f460ff05c7fe81fe4a9577a804cb9367ff66",
+      "note": "From encryption.json — a real derived public key. Guards against over-rejection: the check must never refuse an honest guardian."
+    },
+    {
+      "name": "ordinary-public-key-2",
+      "key_hex": "493e82fc74464a59268817623d2053c5eb8e2cc4a988b4fee179ec6b010d531d",
+      "note": "From encryption.json."
+    },
+    {
+      "name": "high-bit-set",
+      "key_hex": "d89e3bad79437dbed9f843418304f460ff05c7fe81fe4a9577a804cb9367ffe6",
+      "note": "X25519 masks the high bit of the u-coordinate, so this must still be accepted — a naive byte comparison against the p-based entries above could wrongly reject values in this shape."
+    }
+  ]
+}

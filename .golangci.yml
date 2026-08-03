@@ -1,0 +1,22 @@
+# golangci-lint v2 configuration.
+#
+# Keep GOLANGCI_LINT_VERSION (Makefile) and the CI install step
+# (.github/workflows/ci.yml) in lockstep with the version this file targets.
+#
+# Intent: v1-parity. v2 enables new style/quickfix check families by default;
+# this config restores the v1 lint surface rather than churning working code for
+# style opinions.
+version: "2"
+
+linters:
+  settings:
+    staticcheck:
+      # v1 shipped staticcheck (SA*) + gosimple (S1*); the ST* style and
+      # QF* quickfix families arrived with the v2 staticcheck merge.
+      checks: ["all", "-QF*", "-ST*"]
+  exclusions:
+    # std-error-handling restores v1's default errcheck exclusions
+    # (deferred Close, fmt printing, os.Remove, …).
+    presets:
+      - common-false-positives
+      - std-error-handling

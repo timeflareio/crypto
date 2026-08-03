@@ -1,0 +1,12 @@
+# Accepted govulncheck advisories — reachable findings that CANNOT be fixed by
+# bumping a dependency. Every entry needs a reason and an exit condition, and
+# the whole file is re-audited whenever dependencies move.
+#
+# Adding an entry here is a last resort: if a fixed release exists, bump the
+# module instead.
+#
+# EMPTY BY DESIGN. This module depends only on the standard library,
+# golang.org/x/crypto and golang.org/x/sys, so it inherits none of the
+# consensus-stack advisories the chain and guardian carry. If an entry ever
+# becomes necessary here, that is a signal the dependency surface has grown —
+# question the dependency before accepting the advisory.

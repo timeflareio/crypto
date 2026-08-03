@@ -1,0 +1,48 @@
+version: 2
+updates:
+  # Go module at the repository root (stdlib + golang.org/x/crypto only).
+  #
+  # No cosmos group here, unlike the chain and guardian: this module carries no
+  # consensus-stack dependency, which is precisely the property that lets the
+  # chain and guardian both pin it without inheriting anything.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      routine:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # Rust crate (WASM source). Cryptographic dependencies are deliberately NOT
+  # grouped with routine updates: a bump to x25519-dalek, chacha20poly1305,
+  # sha2 or hmac can change primitive behaviour byte-for-byte, and the vector
+  # corpus is the only thing standing between that and silent wire drift. Each
+  # arrives as its own PR so it is reviewed against `make test` deliberately.
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
+    groups:
+      routine:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "x25519-dalek"
+          - "chacha20poly1305"
+          - "sha2"
+          - "hmac"
+          - "rand_core"
+          - "rand_chacha"
+          - "getrandom"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
