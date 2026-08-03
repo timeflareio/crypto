@@ -185,7 +185,8 @@ var validationScalar = [32]byte{
 //
 // Consensus-critical: a pure byte-in/error-out function with no randomness and
 // no state, so it is safe on the consensus path and in genesis validation.
-// See docs/spec.md "Common Attack Vectors", Small-Order Key Registration.
+// See the chain repository's docs/spec.md, "Common Attack Vectors",
+// Small-Order Key Registration.
 func ValidateX25519PublicKey(key []byte) error {
 	if len(key) != PublicKeyLength {
 		return fmt.Errorf("x25519 public key must be exactly %d bytes, got %d", PublicKeyLength, len(key))

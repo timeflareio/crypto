@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 )
 
-// Rebate collection is commit–reveal (docs/spec.md "Recipient Rebate"). The
+// Rebate collection is commit–reveal (chain repo docs/spec.md, "Recipient Rebate"). The
 // recipiency proof `z` is a bearer secret: once it is in a transaction it is
 // public, and a rebate paid to whoever presents `z` could be front-run by any
 // observer — a validator most easily of all. So a collector first publishes a

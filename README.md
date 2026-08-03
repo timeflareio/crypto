@@ -81,8 +81,8 @@ path, and nothing here enforces or checks chain protocol rules.
 
 **A change to what the primitives produce is not an implementation detail.** It
 invalidates every existing secret, share and hint in the wild, so it is a
-protocol change: it needs the owner's explicit approval, a `docs/spec.md` update
-in the chain repository, matching vector updates, and a coordinated roll of every
+protocol change: it needs the owner's explicit approval, a `docs/spec.md`
+update in the chain repository, matching vector updates, and a coordinated roll of every
 consumer. The version number carries that signal and nothing else does:
 
 | | Behaviour-preserving change | Primitive output changes |

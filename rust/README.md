@@ -1,12 +1,12 @@
 # Timeflare Crypto Library
 
-The client-side cryptographic implementation for the Timeflare protocol, compiled to WASM for the TypeScript SDK. This crate is the sole implementation of every client-side primitive (sealing, Shamir Secret Sharing, detection hints); the chain and guardian daemon use pure-Go implementations of the two primitives the server side needs (HMAC and asymmetric encryption), with byte-compatibility pinned by the shared `../testdata/vectors/` corpus.
+The client-side cryptographic implementation for the Timeflare protocol, compiled to WASM for the TypeScript SDK. This crate is the sole implementation of every client-side primitive (sealing, Shamir Secret Sharing, detection hints); the chain and guardian daemon use pure-Go implementations of the two primitives the server side needs (HMAC and asymmetric encryption), with byte-compatibility pinned by the shared `../vectors/` corpus.
 
 ## Overview
 
 - **Shamir Secret Sharing (SSS)** over GF(256) with configurable thresholds (2–16 of 2–32)
 - **Asymmetric encryption** using ephemeral X25519 ECDH + ChaCha20-Poly1305
-- **Key-share sealing** (`seal_secret`/`unseal_secret`) — the four-layer encryption architecture from `docs/spec.md`
+- **Key-share sealing** (`seal_secret`/`unseal_secret`) — the four-layer encryption architecture from the chain repository's `docs/spec.md`
 - **Detection hints** for unlinkable recipient discovery
 - **Guardian HMAC commitments** for reveal verification and slashing evidence
 - **WASM bindings** for JavaScript/browser integration (built with `wasm-pack`)
@@ -28,7 +28,7 @@ The client-side cryptographic implementation for the Timeflare protocol, compile
 
 ## Normative wire formats
 
-These are protocol interfaces (see `docs/spec.md`), byte-exact across implementations:
+These are protocol interfaces (see the chain repository's `docs/spec.md`), byte-exact across implementations:
 
 - **Encryption**: `ephemeral_public(32) ‖ nonce(12) ‖ ChaCha20-Poly1305 ciphertext+tag`, key = `SHA256(X25519_shared ‖ "timeflare_encryption")`
 - **Key-share envelope**: `version(1) ‖ sss_id(1) ‖ share(32)` = 34 bytes
@@ -37,7 +37,7 @@ These are protocol interfaces (see `docs/spec.md`), byte-exact across implementa
 
 ## Cross-implementation drift prevention
 
-The pure-Go server-side implementations (`../crypto/`) and this crate are kept byte-identical by the **shared vector corpus** in `../testdata/vectors/` (`hmac.json`, `encryption.json`, `detection_hint.json`), asserted by both test suites:
+The pure-Go server-side implementations (`../go/`) and this crate are kept byte-identical by the **shared vector corpus** in `../vectors/` (`hmac.json`, `encryption.json`, `detection_hint.json`), asserted by both test suites:
 
 - Rust: `cargo test` (vector tests in `utils.rs`, `crypto.rs`, `detect.rs`)
 - Go: `go test ./crypto/` (`vectors_test.go`)

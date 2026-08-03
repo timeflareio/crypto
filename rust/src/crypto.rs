@@ -213,7 +213,8 @@ fn encrypt_with_parts(
     // all-zero secret and leaves the check to the caller. Failing loudly here is
     // the whole point: the chain rejects such keys at registration, but a client
     // must never be the component that fails silently.
-    // See docs/spec.md "Common Attack Vectors", Small-Order Key Registration.
+    // See the chain repository's docs/spec.md, "Common Attack Vectors",
+    // Small-Order Key Registration.
     if !shared_secret.was_contributory() {
         return Err(CryptoError::InvalidInput(
             "recipient public key is a small-order point: the shared secret would be publicly computable".to_string(),
