@@ -1,0 +1,10 @@
+[
+  {
+    "collector_address_hex": "1f2e3d4c5b6a798807162534435261708f9eadbc",
+    "commitment_hex": "e4857b09b2ac7743691ea289465b0593a9de2855aae9af668c94954de4c793dc",
+    "ephemeral_public_hex": "605a725d2a4adfeeb1a29e17edd621c1b7593ee8cdbc44ac6c4ab6e2f805d23c",
+    "name": "normative-v1-vector",
+    "proof_hex": "caa14fedd7bf6bb2504b5c4df39c84b9c8e6848b6e06d9d0fbbc5eabcaaa1759",
+    "recipient_private_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+  }
+]

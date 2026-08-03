@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Dependabot's github-actions PRs touch only .github/workflows/**. Without a
+  # job that always runs, they would merge with zero CI.
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run actionlint
+        run: |
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+  # One job runs `make verify && make test` exactly as a developer does, so CI
+  # and the local loop cannot drift. Both toolchains are needed because the two
+  # implementations are verified together — that joint assertion against the
+  # vendored vector corpus is the whole point of keeping them in one repo.
+  verify-and-test:
+    name: Verify + test (Go + Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # Installed as prebuilt binaries ahead of `make verify`, which would
+      # otherwise `go install` them — minutes on a cold cache. Keep the version
+      # in lockstep with the Makefile and .golangci.yml.
+      - name: Install Go lint tooling
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+          go install golang.org/x/tools/cmd/goimports@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify
+        env:
+          # vectors-verify reads a chain release manifest once VECTORS_VERSION
+          # points at a chain tag (phase 2b). While the chain repo is private
+          # the default token cannot read it cross-repo — that step will need a
+          # PAT secret at the point the pin flips.
+          GH_TOKEN: ${{ github.token }}
+        run: make verify
+
+      - name: Test
+        run: make test
+
+  # Advisory scans in their own job: a new upstream advisory should not mask a
+  # test or lint failure, and vice versa.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Audit Go dependencies
+        env:
+          GOTOOLCHAIN: auto
+        run: make go-govulncheck
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2.85.3
+        with:
+          tool: cargo-audit
+      - name: Audit Rust dependencies
+        run: cd rust && cargo audit

@@ -1,0 +1,16 @@
+# The version of the cross-implementation vector corpus that vectors/ holds.
+#
+# The corpus is owned by timeflareio/chain (testdata/vectors/). Normally this
+# file holds a chain release tag (e.g. v0.1.0) and `make vectors-verify`
+# checks the vendored copy against that release's SHA-256 manifest.
+#
+# Right now it holds a monorepo commit instead, because this repo was lifted
+# before the chain repo existed to publish anything (multi-repo migration plan,
+# phase 1). `make vectors-verify` is inert while the pin has this shape and
+# says so rather than passing silently. It becomes a real check when the chain
+# repo cuts its first release and this file moves to that tag — phase 2b.
+#
+# The flip is a formality, not a risk: all other work is frozen for the
+# duration of the migration, so the corpus this copy came from and the corpus
+# chain will publish are the same bytes.
+monorepo:3c3bda1db7847e81e48cd454dbfcf2db18027863
