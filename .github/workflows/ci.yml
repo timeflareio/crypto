@@ -117,7 +117,7 @@ jobs:
           GOTOOLCHAIN: auto
         run: make go-govulncheck
       - name: Install cargo-audit
-        uses: taiki-e/install-action@v2.85.3
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: cargo-audit
       - name: Audit Rust dependencies
