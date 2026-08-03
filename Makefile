@@ -5,8 +5,12 @@
 # to WASM for the TypeScript SDK), with the corpus that holds them together in
 # vectors/. They are NOT allowed to drift, and nothing in this repo prevents
 # drift by construction — what prevents it is that both suites assert the same
-# vendored vector corpus, so `make test` fails on the side that changed. Keep it
-# that way.
+# corpus, so `make test` fails on the side that changed. Keep it that way.
+#
+# This repository is self-contained: it defines primitives that other components
+# depend on, and depends on none of them. Nothing here reaches for the chain, and
+# nothing here enforces or checks chain protocol rules. `make test` and
+# `make verify` are offline and hermetic.
 #
 # go.mod stays at the repository root deliberately, even though the sources sit
 # in go/: that keeps one plain vX.Y.Z tag line serving both the Go module and
@@ -21,10 +25,10 @@ TEST_TIMEOUT          ?= 10m
 COVERAGE_FILE         ?= coverage.out
 COVERAGE_HTML_FILE    ?= coverage.html
 
-# The chain release tag this repo's vendored vectors/ copy is pinned to.
-VECTORS_VERSION := $(shell cat VECTORS_VERSION 2>/dev/null | grep -v '^\#' | head -1)
-VECTORS_REPO    ?= timeflareio/chain
-VECTORS_FILES   := detection_hint encryption hmac low_order_keys rebate_commitment
+# The corpus files this repository owns and publishes. Consumers (TypeScript
+# SDK, mobile client) pin a release and assert these to prove they interoperate
+# with the primitives defined here.
+VECTORS_FILES := detection_hint encryption hmac low_order_keys rebate_commitment
 
 # wasm-pack output directory (published as a release asset, never committed)
 WASM_OUT_DIR ?= pkg
@@ -32,7 +36,7 @@ WASM_OUT_DIR ?= pkg
 ##@ Testing
 
 .PHONY: test
-test: go-test rust-test ## Run both suites (Go + Rust) against the vendored vectors
+test: go-test rust-test ## Run both suites (Go + Rust) against the shared vectors
 
 .PHONY: go-test
 go-test: ## Run the Go test suite
@@ -62,10 +66,9 @@ rust-test: ## Run the Rust test suite
 # them today would fail on ~880 lines of reformatting and 6 clippy findings
 # that have nothing to do with this repository's own work. Both targets exist
 # and both should join `verify` once the crate is clean; that is
-# docs/planning/PENDING_RUST_HYGIENE_PLAN.md, deliberately kept out of the lift
-# so the lift stays reviewable as a faithful copy.
+# docs/planning/PENDING_RUST_HYGIENE_PLAN.md.
 .PHONY: verify
-verify: go-format-check go-imports-check go-vet go-lint-check vectors-verify ## Verify all standards (read-only)
+verify: go-format-check go-imports-check go-vet go-lint-check ## Verify all standards (read-only)
 	@echo "✅ All checks passed"
 	@echo "ℹ  Rust format/lint not yet gated — docs/planning/PENDING_RUST_HYGIENE_PLAN.md"
 
@@ -141,72 +144,33 @@ rust-audit: ## Audit Rust dependencies (advisory, not in verify)
 
 ##@ Vectors
 
-# The corpus is owned by the chain repo. This repo vendors a pinned copy of the
-# files its two suites assert — deliberately a subset, not the whole corpus, so
-# a corpus change that touches only chain- or SDK-side vectors does not force a
-# pointless bump here.
+# vectors/ is OWNED here. It pins the primitives this repository defines, and it
+# is the artefact downstream implementations (TypeScript SDK, mobile client)
+# assert to prove they interoperate. Vectors are append-only: adding cases is
+# ordinary work, changing an existing expected value is a breaking primitive
+# change (see README.md "Versioning").
+#
+# There is no sync or verify step, and deliberately so: this repository is the
+# source of these vectors, not a consumer of someone else's copy.
 
-.PHONY: vectors-verify
-vectors-verify: ## Verify the vendored vectors against the pinned chain release manifest
+.PHONY: vectors-package
+vectors-package: ## Package the owned corpus with a SHA-256 manifest (used by release.yml)
 	@set -e; \
-	if [ -z "$(VECTORS_VERSION)" ]; then \
-		echo "❌ VECTORS_VERSION is empty"; exit 1; \
-	fi; \
-	case "$(VECTORS_VERSION)" in \
-		monorepo:*) \
-			echo "⏭  vectors pinned to $(VECTORS_VERSION) — pre-release hand-sync,"; \
-			echo "   no published manifest to verify against yet. This becomes a"; \
-			echo "   real check when VECTORS_VERSION moves to a chain tag."; \
-			exit 0;; \
-	esac; \
-	echo "--> Verifying vectors against $(VECTORS_REPO)@$(VECTORS_VERSION)"; \
-	tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
-	gh release download "$(VECTORS_VERSION)" --repo "$(VECTORS_REPO)" \
-		--pattern 'vectors-*.sha256' --dir "$$tmp" || \
-		{ echo "❌ could not download the vectors manifest for $(VECTORS_VERSION)"; exit 1; }; \
-	manifest=$$(ls "$$tmp"/vectors-*.sha256); \
-	fail=0; \
-	for v in $(VECTORS_FILES); do \
-		want=$$(grep -E "(^|/)$$v\.json$$" "$$manifest" | awk '{print $$1}'); \
-		if [ -z "$$want" ]; then \
-			echo "❌ $$v.json absent from the manifest"; fail=1; continue; \
-		fi; \
-		got=$$(shasum -a 256 "vectors/$$v.json" | awk '{print $$1}'); \
-		if [ "$$want" != "$$got" ]; then \
-			echo "❌ $$v.json checksum mismatch (manifest $$want, local $$got)"; fail=1; \
-		fi; \
-	done; \
-	if [ $$fail -ne 0 ]; then \
-		echo "Run 'make vectors-sync' — never hand-edit vectors/"; exit 1; \
-	fi; \
-	echo "✅ vectors match $(VECTORS_VERSION)"
-
-.PHONY: vectors-sync
-vectors-sync: ## Refresh the vendored vectors from a chain release (VECTORS_VERSION=vX.Y.Z)
-	@case "$(VECTORS_VERSION)" in \
-		v*) ;; \
-		*) echo "❌ pass a chain release tag, e.g. make vectors-sync VECTORS_VERSION=v0.1.0"; \
-		   exit 1;; \
-	esac
-	@echo "--> Syncing vectors from $(VECTORS_REPO)@$(VECTORS_VERSION)"
-	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
-	gh release download "$(VECTORS_VERSION)" --repo "$(VECTORS_REPO)" \
-		--pattern 'vectors-*.tar.gz' --dir "$$tmp"; \
-	tar -xzf "$$tmp"/vectors-*.tar.gz -C "$$tmp"; \
-	for v in $(VECTORS_FILES); do \
-		src=$$(find "$$tmp" -name "$$v.json" -print -quit); \
-		[ -n "$$src" ] || { echo "❌ $$v.json not in the tarball"; exit 1; }; \
-		cp "$$src" "vectors/$$v.json"; \
-	done
-	@echo "$(VECTORS_VERSION)" > VECTORS_VERSION
-	@echo "✅ vectors synced — review the diff, then run 'make test'"
+	out="$${OUT_DIR:-dist}"; \
+	ver="$${VERSION:-dev}"; \
+	mkdir -p "$$out"; \
+	tar -czf "$$out/timeflare-crypto-vectors-$$ver.tar.gz" \
+		$(foreach v,$(VECTORS_FILES),-C "$(CURDIR)" vectors/$(v).json); \
+	( cd vectors && shasum -a 256 $(foreach v,$(VECTORS_FILES),$(v).json) ) \
+		> "$$out/timeflare-crypto-vectors-$$ver.sha256"; \
+	echo "✅ corpus packaged in $$out/"
 
 ##@ Build
 
 .PHONY: wasm
 wasm: $(WASM_OUT_DIR)/timeflare_crypto.js ## Build the WASM bundle from the Rust crate
 
-$(WASM_OUT_DIR)/timeflare_crypto.js: $(shell find rust/src -name '*.rs') rust/Cargo.toml
+$(WASM_OUT_DIR)/timeflare_crypto.js: $(shell find rust/src -name '*.rs') rust/Cargo.toml rust/rust-toolchain.toml
 	@command -v wasm-pack >/dev/null 2>&1 || { \
 		echo "❌ wasm-pack not found. Install with: cargo install wasm-pack"; exit 1; }
 	@echo "🦀 Building WASM crypto (rust -> $(WASM_OUT_DIR))"
@@ -217,14 +181,14 @@ $(WASM_OUT_DIR)/timeflare_crypto.js: $(shell find rust/src -name '*.rs') rust/Ca
 
 .PHONY: clean
 clean: ## Remove build and test artefacts
-	@rm -rf $(WASM_OUT_DIR) rust/target $(COVERAGE_FILE) $(COVERAGE_HTML_FILE)
+	@rm -rf $(WASM_OUT_DIR) dist rust/target $(COVERAGE_FILE) $(COVERAGE_HTML_FILE)
 	@go clean -cache -testcache 2>/dev/null || true
 	@echo "✅ Cleaned"
 
 .PHONY: doctor
 doctor: ## Check the local toolchain
 	@ok=0; \
-	for t in go cargo rustc wasm-pack gh shasum; do \
+	for t in go cargo rustc wasm-pack; do \
 		if command -v $$t >/dev/null 2>&1; then printf "  ✅ %-12s %s\n" "$$t" "$$(command -v $$t)"; \
 		else printf "  ❌ %-12s MISSING\n" "$$t"; ok=1; fi; \
 	done; \

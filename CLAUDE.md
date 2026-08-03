@@ -14,11 +14,12 @@ implementations:
   fork/halt risk (see `docs/planning/done/DONE_CONSENSUS_CRYPTO_PURE_GO_PLAN.md`).
 - **`rust/`** — compiled to WASM for the TypeScript SDK, which cannot use the
   Go implementation.
-- **`vectors/`** — the corpus that holds the two in agreement.
+- **`vectors/`** — the corpus that holds the two in agreement, owned and
+  published here.
 
 `go.mod` sits at the repository root rather than in `go/`, so one plain
-`vX.Y.Z` tag serves both the Go module and the WASM asset, and `go test ./...`
-works from the root.
+`vX.Y.Z` tag serves all three published artefacts — Go module, WASM bundle and
+vector corpus — and `go test ./...` works from the root.
 
 ## 🚨 A change to one implementation MUST land in the other
 
@@ -65,10 +66,23 @@ primitive, which needs a vector file and the owner's approval first.
 - **Never** let one suite assert a vector the other ignores. That is drift with
   a green build, which is worse than drift with a red one.
 
-The corpus is **owned by `timeflareio/chain`** (`testdata/vectors/`). This repo
-vendors a pinned copy of the files its suites assert, refreshed only by
-`make vectors-sync` and checked by `make vectors-verify`. Never hand-edit
-`vectors/`.
+### The corpus is owned here
+
+`vectors/` belongs to this repository — it pins primitives implemented here, and
+the generator that produces the cases is here
+(`TestGenerateVectors` in `go/vectors_test.go`). There is no sync or verify step
+against anyone else's copy, deliberately: this repository is self-contained, and
+`make test` needs no network and no credentials.
+
+Releases publish the corpus with a SHA-256 manifest, because downstream
+implementations that reimplement these primitives for runtimes Go and WASM cannot
+reach — the mobile client's native layer especially — assert it to prove they
+interoperate. Adding cases is ordinary work. Changing an existing expected value
+is the protocol change described below.
+
+The chain repository keeps a separate corpus for chain semantics (gas, dials,
+share bands, creation fees, wallet derivation). Those files are not mirrored here
+and nothing here asserts them.
 
 ## 🚨 Byte-level primitive changes are protocol changes
 
@@ -77,25 +91,40 @@ implementation detail — it invalidates every existing secret, share and hint.
 Such a change requires:
 
 1. Explicit confirmation from the owner before any code is written.
-2. A corresponding update to `docs/spec.md` **in the chain repo**, which is the
-   single protocol authority for every repo. Link it at a pinned tag; never
-   copy it here.
-3. Matching vector updates landing in the chain repo, then a
-   `make vectors-sync` here.
+2. Both implementations changed together, with the matching vector updates, in
+   the same PR (see the rule above).
+3. A corresponding prose update to `docs/spec.md` **in the chain repo**, which
+   describes the protocol that consumes these primitives. Link it at a pinned
+   tag; never copy it here.
 4. A coordinated roll of every consumer (chain, guardian, TypeScript SDK,
    mobile client).
+
+Note where authority sits. The chain's `docs/spec.md` is the authority for
+*protocol* rules — gas, dials, share bands, fees, lifecycle. The authority for
+what these primitives actually produce is the code and the corpus **here**.
+Nothing in this repository enforces or checks chain protocol rules, and nothing
+here should start.
 
 Refactors that provably preserve output are ordinary work. If you are not
 certain a change preserves output, it does not.
 
+The version number is the only signal consumers get, and the breaking axis is
+reserved for exactly this — never spent on anything else. While on 0.x that axis
+is the MINOR position (`0.1.0` → `0.2.0`); from 1.0.0 it is the MAJOR. See
+"Versioning" in `README.md`, and
+`docs/planning/done/DONE_RELEASE_STRATEGY_PLAN.md` for why.
+
+This module versions independently of the chain: a release here neither waits
+for nor implies a chain release. It stays on 0.x until the owner instructs
+otherwise — do not propose 1.0.0.
+
 ## Essential Commands
 
-- `make test` — both suites (Go + Rust) against the vendored vectors
-- `make verify` — all read-only checks (format, imports, vet, lint, clippy,
-  vectors)
+- `make test` — both suites (Go + Rust) against the shared vectors; offline
+- `make verify` — read-only Go checks (gofmt, imports, vet, golangci-lint)
 - `make clean-code` — fix everything fixable
 - `make wasm` — build the WASM bundle from the Rust crate into `pkg/`
-- `make vectors-verify` / `make vectors-sync` — corpus pin management
+- `make vectors-package` — package the owned corpus + manifest (used by releases)
 - `make doctor` — check the local toolchain
 - `make help` — grouped target list
 

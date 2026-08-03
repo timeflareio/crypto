@@ -10,26 +10,26 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-// vectors/ holds a VENDORED copy of the cross-implementation corpus, pinned by
-// VECTORS_VERSION and verified by `make vectors-verify`. It is consumed by this
-// suite AND the Rust test suite (rust/src/utils.rs, rust/src/crypto.rs). If
-// either implementation drifts — even by one byte — the vectors fail on the
-// side that changed.
+// vectors/ is OWNED by this repository. It pins the primitives defined here and
+// is asserted by this suite AND the Rust test suite (rust/src/utils.rs,
+// rust/src/crypto.rs). If either implementation drifts — even by one byte — the
+// vectors fail on the side that changed. That joint assertion is the only thing
+// standing between the Go/Rust split and silent wire drift.
 //
-// The corpus is OWNED BY THE CHAIN REPO (timeflareio/chain, testdata/vectors/),
-// which is where vector changes land and from which releases publish the
-// tarball this copy is synced from. Never hand-edit vectors/ — use
-// `make vectors-sync`.
+// The corpus is also a published artefact: releases attach it with a SHA-256
+// manifest, so downstream implementations (TypeScript SDK, mobile client) pin a
+// version and prove they interoperate with these primitives.
 //
-// Vectors are append-only. The generator below remains for local iteration
-// when ADDING cases:
+// Vectors are append-only. ADDING cases is ordinary work:
 //
 //	TIMEFLARE_GENERATE_VECTORS=1 go test ./go/ -run TestGenerateVectors
 //
-// It writes into the vendored copy, so `make vectors-verify` will fail against
-// the pinned manifest until the same addition lands in the chain repo and
-// VECTORS_VERSION is bumped — that failure is the mechanism working, not a
-// defect. Verify the Rust side too: cd rust && cargo test vectors
+// then confirm the Rust side agrees: cd rust && cargo test vectors
+//
+// CHANGING an existing expected value is NOT ordinary work — it means the
+// primitives now produce different bytes, which invalidates every secret, share
+// and hint in the wild. Read the versioning rules in README.md and the protocol
+// change process in CLAUDE.md before touching one.
 
 const vectorsDir = "../vectors"
 
