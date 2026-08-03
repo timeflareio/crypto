@@ -129,18 +129,9 @@ others depend on, and depends on none of them.
 ## Documentation
 
 `docs/spec.md` in the chain repository specifies the protocol that consumes
-these primitives, and describes their wire format in prose. It is deliberately
-not copied here — link it at a pinned tag instead. This repository is not a
+these primitives, and describes their wire format in prose. This repository is not a
 consumer of it: the authority for what the primitives actually produce is the
 code and the corpus in this repository. Design plans live in `docs/planning/`.
-
-## Provenance
-
-Lifted from the timeflare monorepo at
-`3c3bda1db7847e81e48cd454dbfcf2db18027863`. Git history is deliberately not
-carried across; the monorepo remains the complete historical record and design
-log. Completed plans that shaped this component travel with it, in
-`docs/planning/done/`.
 
 ## Licence
 
