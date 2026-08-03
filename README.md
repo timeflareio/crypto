@@ -144,4 +144,5 @@ log. Completed plans that shaped this component travel with it, in
 
 ## Licence
 
-MIT (see `rust/Cargo.toml`; a repository-level licence file is pending).
+MIT — see [LICENSE](LICENSE). The Rust crate declares the same in
+`rust/Cargo.toml`.
