@@ -28,7 +28,7 @@ jobs:
   # One job runs `make verify && make test` exactly as a developer does, so CI
   # and the local loop cannot drift. Both toolchains are needed because the two
   # implementations are verified together — that joint assertion against the
-  # vendored vector corpus is the whole point of keeping them in one repo.
+  # owned vector corpus is the whole point of keeping them in one repo.
   verify-and-test:
     name: Verify + test (Go + Rust)
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             rust/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
           restore-keys: cargo-${{ runner.os }}-
 
       # Installed as prebuilt binaries ahead of `make verify`, which would
@@ -92,13 +92,9 @@ jobs:
           go install golang.org/x/tools/cmd/goimports@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
+      # No credentials needed: this repository owns its vectors, so verify and
+      # test are offline and hermetic.
       - name: Verify
-        env:
-          # vectors-verify reads a chain release manifest once VECTORS_VERSION
-          # points at a chain tag (phase 2b). While the chain repo is private
-          # the default token cannot read it cross-repo — that step will need a
-          # PAT secret at the point the pin flips.
-          GH_TOKEN: ${{ github.token }}
         run: make verify
 
       - name: Test
