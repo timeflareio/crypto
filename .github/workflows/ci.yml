@@ -54,14 +54,41 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-
 
       # Installed as prebuilt binaries ahead of `make verify`, which would
-      # otherwise `go install` them — minutes on a cold cache. Keep the version
-      # in lockstep with the Makefile and .golangci.yml.
+      # otherwise `go install` them — minutes on a cold cache. Keep
+      # GOLANGCI_LINT_VERSION in lockstep with the Makefile and .golangci.yml.
+      #
+      # Deliberately NOT `install.sh` piped from master: that script is
+      # unpinned, so what runs in CI can change without a commit here. It is
+      # also what failed on this branch's first run — a truncated download made
+      # its checksum check fire correctly, and there was no retry to absorb it.
+      # This does the same job with the version pinned and the download
+      # retried: fetch the release asset, verify it against that release's own
+      # checksums file, install it.
+      #
+      # Note the trust boundary: asset and checksums come from the same
+      # release, so this protects against a corrupt or truncated download, not
+      # against a compromised upstream release. That is the same model as
+      # install.sh — no weaker, and now pinned.
       - name: Install Go lint tooling
         env:
           GOTOOLCHAIN: auto
+          GOLANGCI_LINT_VERSION: 2.12.2
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-            | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+          set -euo pipefail
+          base="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"
+          tarball="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/${tarball}" "${base}/${tarball}"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/checksums.txt" \
+            "${base}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt"
+          ( cd "${tmp}" && grep " ${tarball}\$" checksums.txt | sha256sum -c - )
+          tar -xzf "${tmp}/${tarball}" -C "${tmp}"
+          install -m 0755 \
+            "${tmp}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint" \
+            "$(go env GOPATH)/bin/golangci-lint"
+          "$(go env GOPATH)/bin/golangci-lint" --version
           go install golang.org/x/tools/cmd/goimports@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
