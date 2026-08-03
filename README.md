@@ -58,11 +58,6 @@ go get github.com/timeflareio/crypto/go@v0.0.1
 import crypto "github.com/timeflareio/crypto/go"
 ```
 
-While this repository is private, consumers need `GOPRIVATE=github.com/timeflareio/*`
-and credentials for the module fetch — locally an SSH rewrite
-(`git config --global url."git@github.com:".insteadOf "https://github.com/"`),
-in CI a token secret with read access here.
-
 **WASM** — released as a build artefact per tag rather than built by consumers;
 the TypeScript SDK pins a version and downloads it, so SDK contributors need no
 Rust toolchain.

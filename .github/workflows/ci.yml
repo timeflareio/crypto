@@ -57,17 +57,19 @@ jobs:
       # otherwise `go install` them — minutes on a cold cache. Keep
       # GOLANGCI_LINT_VERSION in lockstep with the Makefile and .golangci.yml.
       #
-      # Deliberately NOT `install.sh` piped from master: that script is
-      # unpinned, so what runs in CI can change without a commit here. It is
-      # also what failed on this branch's first run — a truncated download made
-      # its checksum check fire correctly, and there was no retry to absorb it.
-      # This does the same job with the version pinned and the download
-      # retried: fetch the release asset, verify it against that release's own
-      # checksums file, install it.
+      # Deliberately NOT `install.sh` piped from master. Two reasons: that
+      # script is unpinned, so what runs in CI can change without a commit
+      # here; and it mis-verifies v2 releases — its checksum lookup matches by
+      # substring and so can pick up the newer `.sbom.json` asset, hashing the
+      # wrong file and failing a download that was actually fine. That is what
+      # broke this repository's first CI run.
+      #
+      # This fetches the release asset directly and verifies it against that
+      # release's own checksums file, with retries for transient failures.
       #
       # Note the trust boundary: asset and checksums come from the same
-      # release, so this protects against a corrupt or truncated download, not
-      # against a compromised upstream release. That is the same model as
+      # release, so this protects against a corrupt download or a wrong-file
+      # mixup, not against a compromised upstream release. Same model as
       # install.sh — no weaker, and now pinned.
       - name: Install Go lint tooling
         env:
