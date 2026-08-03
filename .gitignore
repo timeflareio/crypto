@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Go
+coverage.out
+coverage.html
+bin/
+
+# Rust
+rust/target/
+
+# wasm-pack output (built by `make wasm`, published as a release asset)
+pkg/
