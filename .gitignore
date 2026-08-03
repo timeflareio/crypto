@@ -11,3 +11,6 @@ rust/target/
 
 # wasm-pack output (built by `make wasm`, published as a release asset)
 pkg/
+
+# Release packaging output (built by make vectors-package / release.yml)
+dist/

@@ -1,0 +1,8 @@
+[
+  {
+    "name": "normative-v1-vector",
+    "recipient_private_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "ephemeral_public_hex": "605a725d2a4adfeeb1a29e17edd621c1b7593ee8cdbc44ac6c4ab6e2f805d23c",
+    "tag_hex": "2c5fe1cf67b6892c"
+  }
+]

@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Dependabot's github-actions PRs touch only .github/workflows/**. Without a
+  # job that always runs, they would merge with zero CI.
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run actionlint
+        run: |
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+  # One job runs `make verify && make test` exactly as a developer does, so CI
+  # and the local loop cannot drift. Both toolchains are needed because the two
+  # implementations are verified together — that joint assertion against the
+  # owned vector corpus is the whole point of keeping them in one repo.
+  verify-and-test:
+    name: Verify + test (Go + Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock', 'rust/rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # Installed as prebuilt binaries ahead of `make verify`, which would
+      # otherwise `go install` them — minutes on a cold cache. Keep
+      # GOLANGCI_LINT_VERSION in lockstep with the Makefile and .golangci.yml.
+      #
+      # Deliberately NOT `install.sh` piped from master: that script is
+      # unpinned, so what runs in CI can change without a commit here. It is
+      # also what failed on this branch's first run — a truncated download made
+      # its checksum check fire correctly, and there was no retry to absorb it.
+      # This does the same job with the version pinned and the download
+      # retried: fetch the release asset, verify it against that release's own
+      # checksums file, install it.
+      #
+      # Note the trust boundary: asset and checksums come from the same
+      # release, so this protects against a corrupt or truncated download, not
+      # against a compromised upstream release. That is the same model as
+      # install.sh — no weaker, and now pinned.
+      - name: Install Go lint tooling
+        env:
+          GOTOOLCHAIN: auto
+          GOLANGCI_LINT_VERSION: 2.12.2
+        run: |
+          set -euo pipefail
+          base="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"
+          tarball="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/${tarball}" "${base}/${tarball}"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/checksums.txt" \
+            "${base}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt"
+          ( cd "${tmp}" && grep " ${tarball}\$" checksums.txt | sha256sum -c - )
+          tar -xzf "${tmp}/${tarball}" -C "${tmp}"
+          install -m 0755 \
+            "${tmp}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint" \
+            "$(go env GOPATH)/bin/golangci-lint"
+          "$(go env GOPATH)/bin/golangci-lint" --version
+          go install golang.org/x/tools/cmd/goimports@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # No credentials needed: this repository owns its vectors, so verify and
+      # test are offline and hermetic.
+      - name: Verify
+        run: make verify
+
+      - name: Test
+        run: make test
+
+  # Advisory scans in their own job: a new upstream advisory should not mask a
+  # test or lint failure, and vice versa.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Audit Go dependencies
+        env:
+          GOTOOLCHAIN: auto
+        run: make go-govulncheck
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2.85.3
+        with:
+          tool: cargo-audit
+      - name: Audit Rust dependencies
+        run: cd rust && cargo audit

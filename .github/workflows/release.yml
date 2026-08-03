@@ -1,0 +1,149 @@
+name: Release
+
+# Releases are deliberate: pushing a vX.Y.Z tag is the only trigger. Nothing
+# releases on merge.
+#
+# This repo versions INDEPENDENTLY of the chain (ruled by the owner, August
+# 2026). It is a dependency others consume and it has its own upgrade path, so a
+# release here neither waits for nor implies a chain release, and nothing here
+# checks chain protocol rules.
+#
+# Three artefacts share one tag: the Go module (tagged source), the WASM bundle,
+# and the vector corpus. The corpus ships because downstream implementations
+# assert it to prove they interoperate with these primitives — the SDK and the
+# mobile client have no other source for it.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Verify, build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # rust/rust-toolchain.toml pins the exact toolchain; this step provides
+      # rustup so cargo can honour it.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2.85.3
+        with:
+          tool: wasm-pack
+
+      # Encodes the version policy in README.md ("Versioning"). While this
+      # module is deliberately pre-1.0, a tag that crosses out of 0.x is far
+      # more likely to be a slip than a decision — and committing to a stability
+      # promise by accident is not recoverable, because published tags cannot be
+      # unpublished. Crossing to 1.0 is intentionally a two-step act: change the
+      # policy here, then tag.
+      - name: Enforce the version policy
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          case "${tag}" in
+            v0.*) ;;
+            *)
+              echo "::error::${tag} crosses out of 0.x, which this repository is not ready for."
+              echo "0.x means: no compatibility promise. Going to 1.0.0 is a deliberate"
+              echo "commitment and needs the version policy in README.md updated first, then"
+              echo "this guard relaxed in the same change."
+              exit 1
+              ;;
+          esac
+          echo "✅ ${tag} is within the 0.x policy"
+
+      - name: Install Go lint tooling
+        env:
+          GOTOOLCHAIN: auto
+          GOLANGCI_LINT_VERSION: 2.12.2
+        run: |
+          set -euo pipefail
+          base="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"
+          tarball="golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/${tarball}" "${base}/${tarball}"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/checksums.txt" \
+            "${base}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt"
+          ( cd "${tmp}" && grep " ${tarball}\$" checksums.txt | sha256sum -c - )
+          tar -xzf "${tmp}/${tarball}" -C "${tmp}"
+          install -m 0755 \
+            "${tmp}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint" \
+            "$(go env GOPATH)/bin/golangci-lint"
+          go install golang.org/x/tools/cmd/goimports@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # A release must not ship an implementation pair that has drifted, so both
+      # suites run here even though CI already ran them on the merge commit —
+      # tags can point anywhere.
+      - name: Verify
+        run: make verify
+
+      - name: Test
+        run: make test
+
+      - name: Build the WASM bundle
+        run: make wasm
+
+      - name: Package the artefacts
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          asset="timeflare-crypto-wasm-${GITHUB_REF_NAME}.tgz"
+          tar -czf "dist/${asset}" -C pkg .
+          ( cd dist && sha256sum "${asset}" > "${asset}.sha256" )
+          make vectors-package OUT_DIR=dist VERSION="${GITHUB_REF_NAME}"
+          ls -la dist/
+          echo "WASM_ASSET=${asset}" >> "$GITHUB_ENV"
+
+      - name: Compose release notes
+        run: |
+          set -euo pipefail
+          {
+            echo "## Artefacts"
+            echo
+            echo "Three artefacts, one version line."
+            echo
+            echo "| Artefact | How to consume |"
+            echo "|---|---|"
+            echo "| Go module | \`go get github.com/timeflareio/crypto/go@${GITHUB_REF_NAME}\` — tagged source, built by the consumer |"
+            echo "| WASM bundle | \`${WASM_ASSET}\` below, with \`.sha256\` |"
+            echo "| Vector corpus | \`timeflare-crypto-vectors-${GITHUB_REF_NAME}.tar.gz\` below, with \`.sha256\` manifest |"
+            echo
+            echo "## Conformance"
+            echo
+            echo "\`make verify\` and \`make test\` passed on this commit, so the Go and Rust"
+            echo "implementations were asserted against the corpus published here — byte-equal"
+            echo "on every case, or this release would not exist."
+            echo
+            echo "Downstream implementations (TypeScript SDK, mobile client) should pin this"
+            echo "corpus and assert it to prove they interoperate with these primitives."
+            echo
+            echo "## Compatibility"
+            echo
+            echo "This module versions independently of the chain — a release here neither"
+            echo "waits for nor implies a chain release. While on 0.x there is no compatibility"
+            echo "promise; a change to what the primitives produce is signalled by a MINOR bump"
+            echo "(see Versioning in README.md)."
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            dist/*

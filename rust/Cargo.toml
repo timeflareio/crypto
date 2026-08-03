@@ -1,0 +1,50 @@
+[package]
+name = "timeflare-crypto"
+version = "0.1.0"
+edition = "2021"
+description = "Cryptographic library for Timeflare protocol: Shamir Secret Sharing and unified asymmetric encryption"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Core crypto - keep for unified implementation
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+chacha20poly1305 = "0.11"
+sha2 = "0.11"
+hmac = "0.13"
+rand_core = "0.10"
+rand_chacha = "0.10"
+
+# WASM bindings
+wasm-bindgen = { version = "0.2", features = ["serde-serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+
+# Error handling
+thiserror = "2.0"
+
+# Hex encoding (used in tests and vector fixtures)
+hex = "0.4"
+
+# WASM-specific dependencies  
+getrandom = { version = "0.4", features = ["wasm_js"] }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+serde_bytes = "0.11.19"
+
+[features]
+default = []
+console_error_panic_hook = ["dep:console_error_panic_hook"]
+
+# Enable optimizations for release builds
+[profile.release]
+opt-level = "s"  # Optimize for size
+lto = true       # Link-time optimization
+codegen-units = 1
+
+# WASM-specific configuration
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-Os", "--enable-mutable-globals"]

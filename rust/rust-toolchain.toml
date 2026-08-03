@@ -1,0 +1,17 @@
+# Pinned so the published WASM bundle is byte-reproducible from its tag.
+#
+# wasm-pack output varies with the toolchain that produced it, so an unpinned
+# `stable` would mean the artefact attached to a release could not be
+# regenerated from the same source months later — which is the one place
+# reproducibility actually matters here.
+#
+# rustfmt and clippy are declared so their output is deterministic too: both are
+# version-sensitive, and gating on them without a pin makes CI fail whenever the
+# runner's stable moves (see docs/planning/PENDING_RUST_HYGIENE_PLAN.md).
+#
+# Bumping this is a routine dependency update, but expect it to arrive with lint
+# fixes attached: a new toolchain can introduce new clippy lints.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
