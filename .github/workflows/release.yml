@@ -36,7 +36,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.85.3
+        uses: taiki-e/install-action@v2.85.5
         with:
           tool: wasm-pack
 
