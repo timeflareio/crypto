@@ -14,3 +14,7 @@ pkg/
 
 # Release packaging output (built by make vectors-package / release.yml)
 dist/
+
+# Claude Code worktrees — machine-local execution checkouts, never history.
+# Deliberately narrow: .claude/settings.json, agents and skills stay committable.
+.claude/worktrees/
