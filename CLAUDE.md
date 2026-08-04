@@ -3,6 +3,13 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository.
 
+**It is not the whole picture.** The project-wide rules — the working agreement,
+the writing conventions (British English, VEIL is a token, never name the owner),
+the plan-first mandate, specification authority, and how a change crosses a
+repository boundary — are stated once in the workspace root `CLAUDE.md`, at
+`~/dev/timeflareio/CLAUDE.md`, which loads alongside this file. Read it if you
+are in a checkout that cannot see it.
+
 ## Project Overview
 
 **timeflare crypto** holds the protocol's cryptographic primitives in two
@@ -130,49 +137,11 @@ otherwise — do not propose 1.0.0.
 
 `make test` runs both suites. Running only one proves nothing about drift.
 
-## 🚨 Plan-First Workflow (mandatory — everything)
+## Specific to this repository
 
-All work is executed from an approved plan in `docs/planning/`. Code, docs,
-dependency changes: every change traces to a plan the owner has approved.
-Discussion is not approval — answering a question or receiving a favourable
-reply is never licence to edit. Propose, wait for the ruling, fold it into a
-plan, then execute. The only exception is a change the owner explicitly
-requests in the moment, and even then the scope is exactly what was asked.
-
-The rules for authoring and refining plans are in `docs/planning/README.md`.
-
-## Important Instructions for Claude
-
-- Do what has been asked; nothing more, nothing less
-- NEVER create files unless explicitly asked to implement or code a solution
-- When asked to "elaborate", "explain", or give "feedback", give verbal
-  explanations only
-- ALWAYS prefer editing existing files over creating new ones
-- **🚨 CRITICAL: When asked to create a "plan", ONLY create the plan document —
-  DO NOT start implementing**
-- **Always wait for explicit approval** before proceeding from planning to
-  implementation
-- **🚨 CRITICAL: Keep the architecture minimal.** Never introduce a new
-  component (module, package, service, binary, build target, or second
-  implementation) without arguing the case and getting explicit confirmation
-  first. Default to extending what exists. Where duplication is genuinely
-  unavoidable — as with the Go/Rust split here — it must be pinned by shared
-  test data so it cannot drift.
-- **Documentation Language**: ALL documentation must use British English
-- **Spelling Standard**: use `-ise` endings (organise, realise), `-our`
-  endings (behaviour), `-sation` endings (organisation)
-- **🚨 VEIL is a token, never money.** Do not use "money", "cash", "funds",
-  "payment" or any currency framing for VEIL — in code, comments,
-  documentation, plans, commit messages or conversation. Say "token", "VEIL",
-  "uveil", "balance", "amount", "fee", "cost", "bond", "reward" or "rebate".
-  This is not a style preference: describing a token as money makes a
-  regulatory claim the project does not make.
-- **🚨 NEVER name the owner.** No personal name appears anywhere in the
-  repository — not in code, comments, documentation, plans, commit messages or
-  test fixtures. Decisions are attributed to **"the owner"**
-  (`(owner, July 2026)`, "ruled by the owner"), never to a person. This covers
-  every form: given name, surname, handle, email address, and machine paths
-  that embed a username.
-- NEVER create code in production code spaces purely for the purpose of tests
-- Favour Go for server-side work; the Rust crate exists for the WASM target
-  only and should not grow beyond it
+- **The Rust crate exists for the WASM and UniFFI targets only** and should not
+  grow beyond them. The Go/Rust duplication here is the project's one sanctioned
+  second implementation, and it is sanctioned *because* the corpus pins it — the
+  general rule against new components (workspace root `CLAUDE.md`) is not
+  relaxed for anything else in this repository.
+- Plans live in `docs/planning/`, per its `README.md`.
