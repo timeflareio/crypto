@@ -93,8 +93,11 @@ jobs:
       - name: Test
         run: make test
 
-      - name: Build the WASM bundle
-        run: make wasm
+      # Builds the bundle, stages the travelling vectors beside it, and stamps the
+      # package's name and version so a consumer's dependency key and the artefact
+      # agree.
+      - name: Build and stage the WASM package
+        run: make wasm-package VERSION="${GITHUB_REF_NAME}"
 
       - name: Package the artefacts
         run: |
@@ -103,9 +106,29 @@ jobs:
           asset="timeflare-crypto-wasm-${GITHUB_REF_NAME}.tgz"
           tar -czf "dist/${asset}" -C pkg .
           ( cd dist && sha256sum "${asset}" > "${asset}.sha256" )
-          make vectors-package OUT_DIR=dist VERSION="${GITHUB_REF_NAME}"
           ls -la dist/
           echo "WASM_ASSET=${asset}" >> "$GITHUB_ENV"
+
+      # A consumer resolves this asset by URL and npm records its integrity hash,
+      # so the tarball must carry the identity and the vectors the consumer
+      # expects. Assert rather than assume.
+      - name: Assert the package identity and payload
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          tar -xzf "dist/${WASM_ASSET}" -C "$tmp"
+          name="$(sed -n 's/.*"name": *"\([^"]*\)".*/\1/p' "$tmp/package.json" | head -1)"
+          version="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$tmp/package.json" | head -1)"
+          echo "packaged: ${name}@${version}"
+          [ "${name}" = "@timeflareio/crypto" ] || {
+            echo "::error::package name is '${name}', expected '@timeflareio/crypto'"; exit 1; }
+          [ "${version}" = "${GITHUB_REF_NAME#v}" ] || {
+            echo "::error::package version is '${version}', expected '${GITHUB_REF_NAME#v}'"; exit 1; }
+          for v in low_order_keys rebate_commitment; do
+            [ -f "$tmp/vectors/${v}.json" ] || {
+              echo "::error::vectors/${v}.json is absent from the package"; exit 1; }
+          done
+          echo "✅ ${name}@${version} carries the travelling vectors"
 
       - name: Compose release notes
         run: |
@@ -113,22 +136,24 @@ jobs:
           {
             echo "## Artefacts"
             echo
-            echo "Three artefacts, one version line."
+            echo "Two artefacts, one version line."
             echo
             echo "| Artefact | How to consume |"
             echo "|---|---|"
             echo "| Go module | \`go get github.com/timeflareio/crypto/go@${GITHUB_REF_NAME}\` — tagged source, built by the consumer |"
-            echo "| WASM bundle | \`${WASM_ASSET}\` below, with \`.sha256\` |"
-            echo "| Vector corpus | \`timeflare-crypto-vectors-${GITHUB_REF_NAME}.tar.gz\` below, with \`.sha256\` manifest |"
+            echo "| WASM package | \`@timeflareio/crypto\` — the \`${WASM_ASSET}\` asset below, resolved by URL, with \`.sha256\` |"
+            echo
+            echo "The WASM package carries \`vectors/low_order_keys.json\` and"
+            echo "\`vectors/rebate_commitment.json\`: the two corpus files an implementation"
+            echo "outside this repository asserts. The rest of the corpus holds this"
+            echo "repository's Go and Rust suites against each other and reaches no consumer,"
+            echo "so it is not published."
             echo
             echo "## Conformance"
             echo
             echo "\`make verify\` and \`make test\` passed on this commit, so the Go and Rust"
-            echo "implementations were asserted against the corpus published here — byte-equal"
-            echo "on every case, or this release would not exist."
-            echo
-            echo "Downstream implementations (TypeScript SDK, mobile client) should pin this"
-            echo "corpus and assert it to prove they interoperate with these primitives."
+            echo "implementations were asserted against the whole corpus in this tree —"
+            echo "byte-equal on every case, or this release would not exist."
             echo
             echo "## Compatibility"
             echo
