@@ -128,8 +128,22 @@ attach to an import.
    sheds its `components: rustfmt, clippy` input, which `rust-toolchain.toml`
    declares for the toolchain that actually runs.
 
+7. Correct the secret-size bounds in the `sss.rs` module documentation. It
+   states a 1-byte minimum, which contradicts the `MIN_SECRET_SIZE` beside it
+   and the ruling in §1 that empty secrets are valid. The 1MB maximum is
+   accurate but reads as a protocol bound; it is a memory guard, and the
+   protocol splits a 32-byte X25519 scalar (`chain/docs/spec.md`, key-share
+   architecture). Documentation only — the constants do not move, since
+   changing either is a byte-level primitive change and neither bound is
+   reachable through any protocol path.
+
 Steps 2 and 3 are reproducible against the declared toolchain, and CI resolves
 to that same toolchain.
+
+Step 7 is not lint or format work. It is folded in because step 3 rewrites the
+doc block it lives in, and leaving a known-false bound in lines being rewritten
+would be worse than the drift the rest of this plan removes (owner, August
+2026).
 
 ## 4. What this plan does not solve
 

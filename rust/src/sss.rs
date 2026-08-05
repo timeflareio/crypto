@@ -16,10 +16,13 @@
 //!   - Maximum 32 for reasonable guardian coordination and economics
 //!   - Must be at least equal to threshold for the scheme to work
 //!
-//! - **Secret Size**: Must be between 1 byte and 1MB (inclusive)
+//! - **Secret Size**: Must be between 0 bytes and 1MB (inclusive)
+//!   - Empty secrets are valid
 //!   - Each share will be the same size as the secret
 //!   - Memory usage is O(secret_size * num_shares)
-//!   - 1MB maximum ensures mobile compatibility and prevents DoS attacks
+//!   - 1MB maximum ensures mobile compatibility and prevents DoS attacks. It
+//!     is an implementation ceiling, not a protocol one — callers split a
+//!     32-byte X25519 scalar, so nothing reaches it
 //!   - Total memory usage capped at 50MB
 //!
 //! - **Share IDs**: Automatically assigned from 1 to num_shares
