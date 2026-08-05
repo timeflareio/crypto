@@ -1,0 +1,165 @@
+# Cryptographic Assurance — property tests and fuzzing — Plan
+
+*Raises the hand-written cryptographic core from "the tests pass" to "an auditor
+can be handed evidence": universal property tests over the from-scratch GF(256)
+Shamir implementation, fuzz coverage of every function on both sides that parses
+attacker-controlled bytes, and a written position on the two things testing
+cannot reach.*
+
+> **Status: ready** — August 2026. Every open item is settled.
+> **Priority**: P1 — audit readiness. Nothing here fixes a known defect; it is
+> the evidence an external audit and mainnet custody of real secrets will ask
+> for, and it is cheapest to build before a corpus of live secrets exists.
+> **Origin**: automated review of the crate, July 2026, carried forward with the
+> repository when the primitives were lifted out of the monorepo.
+> **Components**: `rust/src/sss.rs`, `rust/src/crypto.rs`, `rust/src/seal.rs`,
+> `rust/src/detect.rs`, `rust/Cargo.toml`, `go/` (fuzz targets and
+> `go/testdata/fuzz/` corpora), `Makefile` (new `fuzz` target), `README.md`.
+> CI is deliberately untouched — see §3.
+
+## 1. Why
+
+Every secret's confidentiality reduces to this repository being correct, on both
+sides: `sss.rs` and `crypto.rs` for the client, `go/encryption.go` and
+`go/hmac.go` for the guardian daemon and the chain.
+
+The 54 Rust and 19 Go unit tests are genuinely good — field laws at sampled
+points, boundary cases, tamper and failure paths, full seal→unseal round trips —
+and the shared corpus in `vectors/` pins the two implementations against each
+other so neither can drift silently. Two gaps remain, and neither is closed by
+adding more of the same:
+
+- **Sampled is not universal.** `sss.rs` is a from-scratch GF(256)
+  implementation — log/exp tables and Lagrange interpolation — and it is the
+  only Shamir implementation in the project, deliberately. There is no second
+  implementation to differential-test it against, so property tests over the
+  field laws and the split→combine identity are the only universal check
+  available to it.
+- **Nothing feeds these parsers bytes they were not designed for.** Both sides
+  take attacker-controlled input from chain state: the guardian daemon decrypts
+  envelope bytes server-side through `DecryptShareWithPrivateKey`, and the WASM
+  client unseals revealed envelopes, payload ciphertext and a commitment through
+  `unseal_secret`. Every one of those paths must reject, never panic and never
+  false-accept, for arbitrary input — and nothing asserts that today beyond the
+  specific malformed cases someone thought to write down.
+
+## 2. Phase 1 — property tests
+
+Add `proptest` as a **dev-dependency** of the Rust crate. It compiles only for
+`cargo test`, so it does not enter the WASM bundle and is not a cryptographic
+dependency under the T3 gate.
+
+Cover:
+
+- **GF(256) field laws universally** — commutativity, associativity,
+  distributivity, `a · a⁻¹ = 1`, and `exp(log(x)) = x` for all `x ≠ 0`.
+- **split→combine is the identity.** Arbitrary secret (weighted towards small,
+  bounded by `MAX_SECRET_SIZE`), arbitrary valid `(threshold, shares)` inside
+  the declared bands — threshold 2–16, shares 2–32, `shares ≥ threshold` — and
+  an arbitrary threshold-sized subset of the shares reconstructs the secret
+  exactly.
+- **Sub-threshold and malformed share sets fail safely.** Fewer than `threshold`
+  shares, duplicated share IDs, mismatched share lengths, ID 0: each must return
+  an error or a value ≠ the secret, and must never panic.
+- **Seal round trip and tamper resistance.** Arbitrary payload through
+  `seal_secret`/`unseal_secret` at arbitrary guardian counts; then flip any
+  single byte of any artefact — an envelope, the payload ciphertext, the
+  commitment — and assert the result is an error, never a panic and never a
+  false accept.
+- **Encryption round trip and malformed ciphertext.** Arbitrary plaintext round
+  trips; truncated, oversized and bit-flipped ciphertexts return an error rather
+  than panicking.
+
+Two documentation defects in `sss.rs` surface here and are fixed as part of the
+phase, because a property test written against the doc comment would be written
+against the wrong bound:
+
+- The header states secrets must be "between 1 byte and 1MB", while
+  `MIN_SECRET_SIZE` is `0` and empty secrets are deliberately accepted.
+- The header claims "constant-time operations for critical paths", which
+  overclaims for the GF(256) table lookups. It is corrected to match the
+  position §4 records.
+
+## 3. Phase 2 — fuzzing
+
+Everything here runs locally through `make`. There is no scheduled CI job: a
+nightly fuzz run costs runner minutes indefinitely, and the durable value is the
+corpus rather than the runner time. What CI gains is automatic — committed
+corpora replay as ordinary tests under the existing `make test`, so no workflow
+file changes.
+
+**Go — `go test -fuzz`, no new tooling and no new component.** The targets are
+ordinary test functions in `go/`:
+
+- `FuzzDecryptShareWithPrivateKey` — arbitrary bytes as the envelope. This is
+  the path the guardian daemon feeds from chain state.
+- `FuzzVerifyHMAC` — arbitrary secret ID, guardian address, share data and
+  expected tag. Must reject, never panic.
+- `FuzzValidateX25519PublicKey` — arbitrary key bytes; must never panic, and its
+  verdict must continue to agree with whether encryption fails, generalising
+  `TestValidateX25519PublicKey_RejectionMatchesEncryptionFailure` from the fixed
+  low-order set to arbitrary input.
+- `FuzzDetectionTagMatches` and `FuzzRebateCommitmentMatches` — arbitrary
+  lengths on both arguments must not panic.
+
+**Rust — randomised input through the Phase 1 `proptest` harness**, not
+`cargo-fuzz`. Coverage-guided fuzzing would mean a new `rust/fuzz/` crate — a
+new build target — and a nightly toolchain alongside the `1.97.0` pin that
+exists to keep WASM output reproducible. Neither is warranted while `proptest`
+reaches the same parsers on the pinned stable toolchain. The targets are
+`TimeflareKeypair::decrypt` (wire format `ephemeral_pub(32) ‖ nonce(12) ‖ ct`),
+`decode_key_share` and `unseal_secret` (the 34-byte envelope, plus ciphertext
+and commitment), `scan_hint`, and `combine_shares` — the last reachable from the
+SDK through the `reconstruct_secret` facade. Each is fed arbitrary bytes and
+must return an error, never panic and never false-accept.
+
+**The `make fuzz` target** drives the saturation runs, and covers both sides:
+
+- Each Go target in sequence — `go test -fuzz` accepts exactly one target per
+  invocation, so a loop is the only shape available.
+- The Rust suite with `PROPTEST_CASES` raised well above its default, which is
+  what turns the Phase 1 harness into a soak rather than a check.
+- `FUZZTIME` and the case count are overridable, so a long run before a release
+  and a short one during development are the same target.
+
+`fuzz` joins neither `verify` nor `test`: both are bounded and hermetic, and an
+unbounded search belongs to a deliberate invocation. What `make test` does gain
+is the regression half — seeds commit under `go/testdata/fuzz/` and replay under
+`go test ./...`, so every crash found once is asserted forever, offline and at
+no cost.
+
+## 4. Phase 3 — the two positions testing cannot reach
+
+Both are documented in `README.md` rather than engineered against. Silence reads
+as an oversight; a written position reads as a decision, and an auditor will
+raise both regardless of what the tests say.
+
+- **Zeroisation.** `x25519-dalek` zeroises secret key material on drop
+  (`seal.rs:161`), but the guardian's decrypted envelopes, reconstructed secrets
+  in WASM linear memory and the SDK's `Uint8Array`s are not systematically
+  wiped. Record what is erased, what is not, and why the browser runtime cannot
+  promise more. Hardening waits for an audit finding rather than being
+  anticipated here.
+- **Constant-time behaviour.** The GF(256) log/exp tables are input-dependent
+  memory accesses, the classic timing side-channel. Record it as an accepted
+  risk: shares are processed client-side or by the guardian that already holds
+  the share, so an attacker positioned to measure the timing already has the
+  material the channel would leak. The `sss.rs` header claim is corrected to
+  agree (§2).
+
+## 5. What this plan does not solve
+
+- **No behaviour change.** If a property or fuzz failure turns out to need a
+  byte-level fix to a shared primitive, that is a protocol change and it stops
+  here — it needs the owner's confirmation, both implementations, vector
+  updates, a chain `docs/spec.md` update and a coordinated consumer roll
+  (`CLAUDE.md`). This plan covers finding such a thing, not landing the fix.
+- **Information-theoretic secrecy is not testable this way.** A sub-threshold
+  share set can be asserted not to reconstruct and not to panic; that it leaks
+  nothing is a proof obligation, not a test.
+- **Timing is not measured.** Property tests and fuzzers observe outputs, not
+  memory-access patterns. §4 is the whole of the answer.
+- **Lint and format conformance** belong to `PENDING_RUST_HYGIENE_PLAN.md`,
+  which explicitly scopes test coverage out to here. That plan should land
+  first: a `cargo fmt` pass rewriting 685 lines across these same files would
+  otherwise collide with every test module this plan adds.
