@@ -31,7 +31,10 @@
 //!
 //! # Security Notes
 //!
-//! - This implementation provides constant-time operations for critical paths
+//! - GF(256) arithmetic is table-driven: `gf256_mul` and `gf256_div` index the
+//!   log/exp tables by operand, so they perform input-dependent memory accesses
+//!   and are not constant-time. What that exposes, and why it is accepted, is
+//!   recorded under "Security posture" in `README.md`
 //! - Random coefficients are generated using ChaCha20Rng for cryptographic security
 //! - Shares can only be validated during reconstruction phase
 
@@ -973,6 +976,231 @@ mod tests {
                 "Size: {} bytes - Split: {:?}, Combine: {:?}",
                 size, split_time, combine_time
             );
+        }
+    }
+}
+
+/// Property tests over the GF(256) field and the split/combine pair.
+///
+/// The unit tests above check the field laws at chosen points. These check them
+/// for every point proptest can reach, which is the only universal check
+/// available here: Shamir has exactly one implementation in this project, so
+/// there is nothing to differential-test it against.
+///
+/// Case count is `PROPTEST_CASES` (default 256). `make fuzz` raises it to turn
+/// this from a check into a soak.
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+    use proptest::sample::Index;
+
+    /// A valid `(threshold, shares)` pair drawn from the declared bands.
+    fn valid_parameters() -> impl Strategy<Value = (u8, u8)> {
+        (MIN_THRESHOLD..=MAX_THRESHOLD)
+            .prop_flat_map(|threshold| (Just(threshold), threshold..=MAX_SHARES))
+    }
+
+    /// Secrets stay small deliberately. These properties explore *shape* —
+    /// thresholds, subsets, malformed input — and a large secret only repeats
+    /// the same per-byte polynomial arithmetic more times. The `MAX_SECRET_SIZE`
+    /// ceiling is a boundary case, asserted by the unit tests above.
+    fn small_secret() -> impl Strategy<Value = Vec<u8>> {
+        prop::collection::vec(any::<u8>(), 0..=64)
+    }
+
+    /// Take `k` distinct shares, chosen by the generated indices so proptest can
+    /// shrink the choice rather than a raw seed.
+    fn pick_distinct(shares: &[Share], picks: &[Index], k: usize) -> Vec<Share> {
+        let mut pool = shares.to_vec();
+        let mut chosen = Vec::with_capacity(k);
+        for pick in picks.iter().take(k) {
+            chosen.push(pool.remove(pick.index(pool.len())));
+        }
+        chosen
+    }
+
+    proptest! {
+        /// Multiplication commutes.
+        #[test]
+        fn gf256_mul_is_commutative(a: u8, b: u8) {
+            prop_assert_eq!(gf256_mul(a, b), gf256_mul(b, a));
+        }
+
+        /// Multiplication associates.
+        #[test]
+        fn gf256_mul_is_associative(a: u8, b: u8, c: u8) {
+            prop_assert_eq!(gf256_mul(gf256_mul(a, b), c), gf256_mul(a, gf256_mul(b, c)));
+        }
+
+        /// Multiplication distributes over addition, which in GF(256) is XOR.
+        #[test]
+        fn gf256_mul_distributes_over_addition(a: u8, b: u8, c: u8) {
+            prop_assert_eq!(
+                gf256_mul(a, gf256_add(b, c)),
+                gf256_add(gf256_mul(a, b), gf256_mul(a, c))
+            );
+        }
+
+        /// 1 is the multiplicative identity and 0 annihilates.
+        #[test]
+        fn gf256_mul_identity_and_zero(a: u8) {
+            prop_assert_eq!(gf256_mul(a, 1), a);
+            prop_assert_eq!(gf256_mul(a, 0), 0);
+        }
+
+        /// Every non-zero element has a multiplicative inverse.
+        #[test]
+        fn gf256_nonzero_elements_have_inverses(a in 1u8..=255) {
+            let inverse = gf256_div(1, a).expect("division by a non-zero element succeeds");
+            prop_assert_eq!(gf256_mul(a, inverse), 1);
+        }
+
+        /// Division undoes multiplication.
+        #[test]
+        fn gf256_div_inverts_mul(a: u8, b in 1u8..=255) {
+            prop_assert_eq!(gf256_div(gf256_mul(a, b), b).unwrap(), a);
+        }
+
+        /// Division by zero is refused rather than indexing the tables.
+        #[test]
+        fn gf256_div_by_zero_is_an_error(a: u8) {
+            prop_assert!(gf256_div(a, 0).is_err());
+        }
+
+        /// The log and exp tables invert each other on the multiplicative group.
+        #[test]
+        fn gf256_log_and_exp_are_inverse(x in 1u8..=255) {
+            prop_assert_eq!(GF256_EXP[GF256_LOG[x as usize] as usize], x);
+        }
+
+        /// Subtraction is addition, and both are XOR.
+        #[test]
+        fn gf256_add_and_sub_agree(a: u8, b: u8) {
+            prop_assert_eq!(gf256_add(a, b), gf256_sub(a, b));
+            prop_assert_eq!(gf256_add(gf256_add(a, b), b), a);
+        }
+
+        /// Any threshold-sized subset of the shares reconstructs the secret
+        /// exactly. This is the whole scheme in one assertion.
+        #[test]
+        fn split_then_combine_is_the_identity(
+            secret in small_secret(),
+            (threshold, shares) in valid_parameters(),
+            picks in prop::collection::vec(any::<Index>(), MAX_THRESHOLD as usize),
+        ) {
+            let split = split_secret(&secret, threshold, shares)
+                .expect("valid parameters split successfully");
+            prop_assert_eq!(split.len(), shares as usize);
+
+            let subset = pick_distinct(&split, &picks, threshold as usize);
+            let recovered = combine_shares(&subset, threshold)
+                .expect("a threshold-sized subset reconstructs");
+            prop_assert_eq!(recovered, secret);
+        }
+
+        /// Every share is the same length as the secret, and share IDs are the
+        /// contiguous range 1..=shares — ID 0 is never issued.
+        #[test]
+        fn split_produces_well_formed_shares(
+            secret in small_secret(),
+            (threshold, shares) in valid_parameters(),
+        ) {
+            let split = split_secret(&secret, threshold, shares).unwrap();
+            for (position, share) in split.iter().enumerate() {
+                prop_assert_eq!(share.data.len(), secret.len());
+                prop_assert_eq!(share.id, position as u8 + 1);
+            }
+        }
+
+        /// Fewer than `threshold` shares is refused outright. Whether the
+        /// remaining shares leak anything about the secret is a proof
+        /// obligation, not something a test can settle — what is asserted here
+        /// is that the call fails cleanly rather than returning a plausible
+        /// wrong answer.
+        #[test]
+        fn sub_threshold_subsets_are_refused(
+            secret in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, shares) in valid_parameters(),
+            picks in prop::collection::vec(any::<Index>(), MAX_THRESHOLD as usize),
+        ) {
+            let split = split_secret(&secret, threshold, shares).unwrap();
+            let subset = pick_distinct(&split, &picks, threshold as usize - 1);
+
+            match combine_shares(&subset, threshold) {
+                Err(SssError::InsufficientShares { .. }) => {}
+                Err(other) => prop_assert!(false, "unexpected error: {}", other),
+                Ok(reconstructed) => prop_assert!(false,
+                    "sub-threshold subset reconstructed {} bytes", reconstructed.len()),
+            }
+        }
+
+        /// A duplicated share ID is caught rather than silently interpolating
+        /// through the same point twice.
+        #[test]
+        fn duplicate_share_ids_are_refused(
+            secret in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, shares) in valid_parameters(),
+        ) {
+            let split = split_secret(&secret, threshold, shares).unwrap();
+            let mut subset: Vec<Share> = split[..threshold as usize].to_vec();
+            subset[threshold as usize - 1] = subset[0].clone();
+
+            prop_assert!(matches!(
+                combine_shares(&subset, threshold),
+                Err(SssError::DuplicateShareIds)
+            ));
+        }
+
+        /// A share whose length disagrees with its peers is caught.
+        #[test]
+        fn mismatched_share_lengths_are_refused(
+            secret in prop::collection::vec(any::<u8>(), 2..=64),
+            (threshold, shares) in valid_parameters(),
+        ) {
+            let split = split_secret(&secret, threshold, shares).unwrap();
+            let mut subset: Vec<Share> = split[..threshold as usize].to_vec();
+            subset[0].data.truncate(secret.len() - 1);
+
+            prop_assert!(matches!(
+                combine_shares(&subset, threshold),
+                Err(SssError::MismatchedShareLengths)
+            ));
+        }
+
+        /// Arbitrary shares — arbitrary IDs, arbitrary and unequal data lengths,
+        /// arbitrary threshold including values outside the declared band —
+        /// against `combine_shares`, which the SDK reaches through the
+        /// `reconstruct_secret` WASM facade. The result is uninteresting; that
+        /// the call returns at all is the assertion.
+        #[test]
+        fn combine_shares_never_panics_on_arbitrary_input(
+            raw in prop::collection::vec(
+                (any::<u8>(), prop::collection::vec(any::<u8>(), 0..=48)),
+                0..=24,
+            ),
+            threshold: u8,
+        ) {
+            let shares: Vec<Share> = raw
+                .into_iter()
+                .map(|(id, data)| Share { id, data })
+                .collect();
+            let _ = combine_shares(&shares, threshold);
+        }
+
+        /// Split rejects out-of-band parameters rather than panicking, for any
+        /// combination of the two.
+        #[test]
+        fn split_secret_never_panics_on_arbitrary_parameters(
+            secret in prop::collection::vec(any::<u8>(), 0..=32),
+            threshold: u8,
+            shares: u8,
+        ) {
+            let result = split_secret(&secret, threshold, shares);
+            let in_band = (MIN_THRESHOLD..=MAX_THRESHOLD).contains(&threshold)
+                && (MIN_SHARES..=MAX_SHARES).contains(&shares)
+                && shares >= threshold;
+            prop_assert_eq!(result.is_ok(), in_band);
         }
     }
 }

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bb0cfaf6cadaa61eacb41a2204616fde3ff9ddde3fcaacaa2f9ebdff9bdb8cb7 # shrinks to payload = [0], (threshold, guardian_count) = (4, 4), which = Index(0), byte_index = Index(1085102592571150096), bit = 6
+cc 2846df893a3a8047ad3b01a302c4ebd2e84e162607dbbf200c68748bf26a159b # shrinks to payload = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], (threshold, guardian_count) = (2, 2), byte_index = Index(4267530345410418658), bit = 7
