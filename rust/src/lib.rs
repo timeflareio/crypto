@@ -1,20 +1,20 @@
-use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
 
 // Public for native (non-WASM) consumers: the mobile client's UniFFI wrapper
 // crate (mobile-client/packages/crypto/rust) calls these pure-Rust modules
 // directly, because the #[wasm_bindgen] facade below shadows `seal_secret` /
 // `unseal_secret` with JsValue-typed versions that only make sense on WASM.
 // Visibility-only change — the WASM/SDK boundary below is untouched.
-pub mod sss;
-pub mod utils;
 pub mod crypto;
 pub mod detect;
 pub mod seal;
+pub mod sss;
+pub mod utils;
 
 // Re-export core functionality
-pub use utils::{CryptoError};
 pub use sss::*;
+pub use utils::CryptoError;
 // Export crypto functions
 pub use crypto::*;
 pub use detect::{DetectionHint, DETECTION_HINT_DOMAIN, DETECTION_TAG_LEN};
@@ -42,10 +42,7 @@ pub struct SssShare {
 
 /// SSS share format validation
 #[wasm_bindgen]
-pub fn validate_share_format(
-    share_id: u8,
-    share_data: &[u8],
-) -> bool {
+pub fn validate_share_format(share_id: u8, share_data: &[u8]) -> bool {
     // Basic format validation for SSS shares
     share_id > 0 && !share_data.is_empty()
 }
@@ -73,8 +70,8 @@ pub fn derive_detection_hint(recipient_public_key: &[u8]) -> Result<Vec<u8>, JsV
         .try_into()
         .map_err(|_| JsValue::from_str("recipient public key must be exactly 32 bytes"))?;
 
-    let hint = detect::derive_detection_hint(&key)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let hint =
+        detect::derive_detection_hint(&key).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let mut result = Vec::with_capacity(32 + detect::DETECTION_TAG_LEN);
     result.extend_from_slice(&hint.ephemeral_pub);
     result.extend_from_slice(&hint.tag);
@@ -142,10 +139,13 @@ pub fn split_secret(secret: &[u8], threshold: u8, shares: u8) -> Result<JsValue,
         .map_err(|e| JsValue::from_str(&format!("SSS split failed: {}", e)))?;
 
     // Convert to JS-friendly format
-    let js_shares: Vec<SssShare> = share_vec.iter().map(|share| SssShare {
-        id: share.id,
-        data: share.data.clone(),
-    }).collect();
+    let js_shares: Vec<SssShare> = share_vec
+        .iter()
+        .map(|share| SssShare {
+            id: share.id,
+            data: share.data.clone(),
+        })
+        .collect();
 
     serde_wasm_bindgen::to_value(&js_shares)
         .map_err(|e| JsValue::from_str(&format!("Serialization failed: {}", e)))
@@ -157,8 +157,12 @@ pub fn reconstruct_secret(shares_js: JsValue, threshold: u8) -> Result<Vec<u8>, 
     let js_shares: Vec<SssShare> = serde_wasm_bindgen::from_value(shares_js)
         .map_err(|e| JsValue::from_str(&format!("Invalid shares format: {}", e)))?;
 
-    let shares: Vec<sss::Share> = js_shares.into_iter()
-        .map(|s| sss::Share { id: s.id, data: s.data })
+    let shares: Vec<sss::Share> = js_shares
+        .into_iter()
+        .map(|s| sss::Share {
+            id: s.id,
+            data: s.data,
+        })
         .collect();
 
     sss::combine_shares(&shares, threshold)
@@ -173,8 +177,9 @@ pub fn encrypt_with_public_key(data: &[u8], public_key_bytes: &[u8]) -> Result<V
     }
 
     let public_key = TimeflarePublicKey::from_bytes(
-        public_key_bytes.try_into()
-            .map_err(|_| JsValue::from_str("Invalid public key format"))?
+        public_key_bytes
+            .try_into()
+            .map_err(|_| JsValue::from_str("Invalid public key format"))?,
     );
 
     crypto::encrypt_for_public_key(data, &public_key)
@@ -183,17 +188,22 @@ pub fn encrypt_with_public_key(data: &[u8], public_key_bytes: &[u8]) -> Result<V
 
 /// Decrypt data with private key (standalone function)
 #[wasm_bindgen]
-pub fn decrypt_with_private_key(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Vec<u8>, JsValue> {
+pub fn decrypt_with_private_key(
+    private_key_bytes: &[u8],
+    encrypted_data: &[u8],
+) -> Result<Vec<u8>, JsValue> {
     if private_key_bytes.len() != 32 {
         return Err(JsValue::from_str("Private key must be 32 bytes"));
     }
 
     let keypair = crypto::TimeflareKeypair::from_bytes(
-        private_key_bytes.try_into()
-            .map_err(|_| JsValue::from_str("Invalid private key format"))?
+        private_key_bytes
+            .try_into()
+            .map_err(|_| JsValue::from_str("Invalid private key format"))?,
     );
 
-    keypair.decrypt(encrypted_data)
+    keypair
+        .decrypt(encrypted_data)
         .map_err(|e| JsValue::from_str(&format!("Decryption failed: {}", e)))
 }
 
@@ -205,8 +215,9 @@ pub fn public_key_from_private(private_key_bytes: &[u8]) -> Result<Vec<u8>, JsVa
     }
 
     let keypair = crypto::TimeflareKeypair::from_bytes(
-        private_key_bytes.try_into()
-            .map_err(|_| JsValue::from_str("Invalid private key format"))?
+        private_key_bytes
+            .try_into()
+            .map_err(|_| JsValue::from_str("Invalid private key format"))?,
     );
 
     Ok(keypair.public_key_bytes().to_vec())

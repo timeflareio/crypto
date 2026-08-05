@@ -38,7 +38,9 @@ pub struct DetectionHint {
 /// Derive a detection hint toward a recipient's long-term public key `A`.
 /// The ephemeral private key and the shared secret never leave this function;
 /// the recipient's key is not part of the result and never touches the chain.
-pub fn derive_detection_hint(recipient_public_key: &[u8; 32]) -> Result<DetectionHint, CryptoError> {
+pub fn derive_detection_hint(
+    recipient_public_key: &[u8; 32],
+) -> Result<DetectionHint, CryptoError> {
     // Fresh ephemeral keypair via the crate's WASM-compatible RNG path
     let ephemeral = TimeflareKeypair::generate();
     let ephemeral_pub = ephemeral.public_key_bytes();
@@ -50,7 +52,8 @@ pub fn derive_detection_hint(recipient_public_key: &[u8; 32]) -> Result<Detectio
     // would be a constant that matches EVERY recipient rather than this one.
     if !shared.was_contributory() {
         return Err(CryptoError::InvalidInput(
-            "recipient public key is a small-order point: the hint would match every recipient".to_string(),
+            "recipient public key is a small-order point: the hint would match every recipient"
+                .to_string(),
         ));
     }
 
@@ -113,13 +116,11 @@ mod tests {
         let recipient = TimeflareKeypair::generate();
         let hint = derive_detection_hint(&recipient.public_key_bytes()).unwrap();
 
-        let matched = scan_hint(
-            &recipient.to_bytes(),
-            &hint.ephemeral_pub,
-            &hint.tag,
-        )
-        .unwrap();
-        assert!(matched, "recipient must recognise a hint derived from their own key");
+        let matched = scan_hint(&recipient.to_bytes(), &hint.ephemeral_pub, &hint.tag).unwrap();
+        assert!(
+            matched,
+            "recipient must recognise a hint derived from their own key"
+        );
     }
 
     #[test]
@@ -137,7 +138,10 @@ mod tests {
         let recipient = TimeflareKeypair::generate();
         let h1 = derive_detection_hint(&recipient.public_key_bytes()).unwrap();
         let h2 = derive_detection_hint(&recipient.public_key_bytes()).unwrap();
-        assert_ne!(h1.ephemeral_pub, h2.ephemeral_pub, "fresh ephemeral per secret");
+        assert_ne!(
+            h1.ephemeral_pub, h2.ephemeral_pub,
+            "fresh ephemeral per secret"
+        );
         assert_ne!(h1.tag, h2.tag, "fresh tag per secret");
     }
 
@@ -145,12 +149,8 @@ mod tests {
     fn wrong_tag_length_is_no_match() {
         let recipient = TimeflareKeypair::generate();
         let hint = derive_detection_hint(&recipient.public_key_bytes()).unwrap();
-        let matched = scan_hint(
-            &recipient.to_bytes(),
-            &hint.ephemeral_pub,
-            &hint.tag[..4],
-        )
-        .unwrap();
+        let matched =
+            scan_hint(&recipient.to_bytes(), &hint.ephemeral_pub, &hint.tag[..4]).unwrap();
         assert!(!matched);
     }
 }
@@ -290,7 +290,10 @@ mod low_order_rejection {
     }
 
     fn load() -> LowOrderVectors {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../vectors/low_order_keys.json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../vectors/low_order_keys.json"
+        );
         let data = std::fs::read_to_string(path).expect("failed to read low_order_keys.json");
         serde_json::from_str(&data).expect("failed to parse low_order_keys.json")
     }
