@@ -40,9 +40,12 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      # The toolchain that actually runs is rust/rust-toolchain.toml's, not this
+      # one: the action sets `rustup default`, which a toolchain file outranks.
+      # That file pins the version and declares rustfmt and clippy, so `make
+      # verify` gates on the same toolchain locally and here. This step exists
+      # to put rustup on PATH and prime the cache.
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
       - uses: actions/cache@v6
         with:

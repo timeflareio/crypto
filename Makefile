@@ -69,20 +69,12 @@ rust-test: ## Run the Rust test suite
 
 ##@ Code quality
 
-# rust-format-check and rust-lint are deliberately NOT in `verify` yet. The
-# crate arrived from the monorepo carrying pre-existing debt — its CI ran
-# `cargo test` and `cargo audit` only, never rustfmt or clippy — so gating on
-# them today would fail on ~880 lines of reformatting and 6 clippy findings
-# that have nothing to do with this repository's own work. Both targets exist
-# and both should join `verify` once the crate is clean; that is
-# docs/planning/PENDING_RUST_HYGIENE_PLAN.md.
 .PHONY: verify
-verify: go-format-check go-imports-check go-vet go-lint-check ## Verify all standards (read-only)
+verify: go-format-check go-imports-check go-vet go-lint-check rust-format-check rust-lint ## Verify all standards (read-only)
 	@echo "✅ All checks passed"
-	@echo "ℹ  Rust format/lint not yet gated — docs/planning/PENDING_RUST_HYGIENE_PLAN.md"
 
 .PHONY: clean-code
-clean-code: go-format go-imports go-lint ## Fix everything fixable (formats, lints with --fix)
+clean-code: go-format go-imports go-lint rust-format ## Fix everything fixable (formats, lints with --fix)
 	@echo "✅ Code cleaned"
 
 .PHONY: go-format
