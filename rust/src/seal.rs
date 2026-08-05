@@ -169,10 +169,7 @@ pub fn seal_secret(
 }
 
 /// Combine revealed key-share envelopes into the per-secret private key.
-pub fn combine_key_shares(
-    envelopes: &[Vec<u8>],
-    threshold: u8,
-) -> Result<[u8; 32], CryptoError> {
+pub fn combine_key_shares(envelopes: &[Vec<u8>], threshold: u8) -> Result<[u8; 32], CryptoError> {
     let shares = envelopes
         .iter()
         .map(|e| decode_key_share(e))
@@ -308,14 +305,23 @@ mod tests {
         let (guardians, guardian_keys) = test_guardians(7);
         let secret_id = "9f2c1a34-0000-4000-8000-000000000002";
 
-        let sealed =
-            seal_secret(&payload, &recipient.public_key_bytes(), &guardians, 3, secret_id)
-                .unwrap();
+        let sealed = seal_secret(
+            &payload,
+            &recipient.public_key_bytes(),
+            &guardians,
+            3,
+            secret_id,
+        )
+        .unwrap();
 
         // A non-contiguous subset (indices 1, 4, 6) must reconstruct
         let revealed: Vec<Vec<u8>> = [1usize, 4, 6]
             .iter()
-            .map(|&i| guardian_keys[i].decrypt(&sealed.key_shares[i].encrypted_share).unwrap())
+            .map(|&i| {
+                guardian_keys[i]
+                    .decrypt(&sealed.key_shares[i].encrypted_share)
+                    .unwrap()
+            })
             .collect();
 
         let inner = unseal_secret(
@@ -335,9 +341,14 @@ mod tests {
         let (guardians, guardian_keys) = test_guardians(5);
         let secret_id = "9f2c1a34-0000-4000-8000-000000000003";
 
-        let sealed =
-            seal_secret(b"secret", &recipient.public_key_bytes(), &guardians, 3, secret_id)
-                .unwrap();
+        let sealed = seal_secret(
+            b"secret",
+            &recipient.public_key_bytes(),
+            &guardians,
+            3,
+            secret_id,
+        )
+        .unwrap();
 
         let revealed: Vec<Vec<u8>> = guardian_keys
             .iter()
@@ -364,9 +375,14 @@ mod tests {
         let (guardians, guardian_keys) = test_guardians(5);
         let secret_id = "9f2c1a34-0000-4000-8000-000000000004";
 
-        let sealed =
-            seal_secret(b"secret", &recipient.public_key_bytes(), &guardians, 3, secret_id)
-                .unwrap();
+        let sealed = seal_secret(
+            b"secret",
+            &recipient.public_key_bytes(),
+            &guardians,
+            3,
+            secret_id,
+        )
+        .unwrap();
 
         let mut revealed: Vec<Vec<u8>> = guardian_keys
             .iter()
@@ -405,9 +421,14 @@ mod tests {
         let (guardians, guardian_keys) = test_guardians(4);
         let secret_id = "9f2c1a34-0000-4000-8000-000000000005";
 
-        let sealed =
-            seal_secret(b"secret", &recipient.public_key_bytes(), &guardians, 2, secret_id)
-                .unwrap();
+        let sealed = seal_secret(
+            b"secret",
+            &recipient.public_key_bytes(),
+            &guardians,
+            2,
+            secret_id,
+        )
+        .unwrap();
 
         let revealed: Vec<Vec<u8>> = guardian_keys
             .iter()
@@ -459,8 +480,10 @@ mod tests {
             let kp = TimeflareKeypair::generate();
             let sk = kp.to_bytes();
             let shares = sss::split_secret(&sk, 3, 5).unwrap();
-            let envelopes: Vec<Vec<u8>> =
-                shares.iter().map(|s| encode_key_share(s).unwrap()).collect();
+            let envelopes: Vec<Vec<u8>> = shares
+                .iter()
+                .map(|s| encode_key_share(s).unwrap())
+                .collect();
             let recovered = combine_key_shares(&envelopes[..3], 3).unwrap();
             assert_eq!(recovered, sk);
         }

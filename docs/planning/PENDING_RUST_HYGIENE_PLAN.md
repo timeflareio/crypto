@@ -12,7 +12,7 @@ arrived with the lift rather than being created by it.*
 > and because one of the six clippy findings marks genuinely dead code.
 > **Origin**: discovered during the phase-1 crypto lift (multi-repo migration
 > plan, in the monorepo). The lift deliberately did *not* fix this: applying
-> `cargo fmt` rewrites 685 lines, which would have buried the 12 meaningful
+> `cargo fmt` rewrites 858 lines, which would have buried the 12 meaningful
 > lines of the lift diff, so the debt was split out here.
 > **Components**: `rust/src/*.rs`, `Makefile` (`verify` and `clean-code`
 > targets), `.github/workflows/ci.yml`.
@@ -96,14 +96,21 @@ attach to an import.
    and `cargo fmt --check` still fails. Removing the one character by hand is
    what makes step 2 reach a clean state rather than a differently-dirty one.
 2. `cargo fmt` as a single mechanical commit, nothing else in it, so review is
-   "formatting only" and the churn is never mixed with logic. Expect 685 lines:
-   `sss.rs` 333, `crypto.rs` 182, `seal.rs` 61, `lib.rs` 59, `detect.rs` 37,
-   `utils.rs` 15. Steps 1 and 2 land together — a commit that leaves
+   "formatting only" and the churn is never mixed with logic. Expect 858 lines:
+   `sss.rs` 463, `crypto.rs` 219, `seal.rs` 61, `lib.rs` 59, `detect.rs` 37,
+   `utils.rs` 19. Steps 1 and 2 land together — a commit that leaves
    `cargo fmt --check` red is not the mechanical commit it claims to be.
-3. Fix the six clippy findings as a second commit, one concern per hunk. Five
+3. Fix the six clippy findings as a second commit, one concern per hunk. Four
    are mechanical; `absurd_extreme_comparisons` is silenced in place with
    `#[allow(clippy::absurd_extreme_comparisons)]` and a comment recording why
    the guard is deliberately vacuous (see §1).
+
+   `empty_line_after_doc_comments` stops firing after step 2, because the blank
+   line it keys on is what rustfmt removes. The defect it named survives and
+   gets worse: the module doc then sits directly above whichever `use` rustfmt
+   sorted beneath it, documenting an import. Fix it by inspection — inner
+   `//!` comments at the top of `sss.rs` and `crypto.rs` — and do not read the
+   shorter clippy output as five findings.
 4. Re-run `make test` — both suites, so the vector corpus proves the primitives
    still produce identical bytes. This is the acceptance gate: **if any vector
    fails, the change was not behaviour-preserving and must be reverted**, since
@@ -121,8 +128,22 @@ attach to an import.
    sheds its `components: rustfmt, clippy` input, which `rust-toolchain.toml`
    declares for the toolchain that actually runs.
 
+7. Correct the secret-size bounds in the `sss.rs` module documentation. It
+   states a 1-byte minimum, which contradicts the `MIN_SECRET_SIZE` beside it
+   and the ruling in §1 that empty secrets are valid. The 1MB maximum is
+   accurate but reads as a protocol bound; it is a memory guard, and the
+   protocol splits a 32-byte X25519 scalar (`chain/docs/spec.md`, key-share
+   architecture). Documentation only — the constants do not move, since
+   changing either is a byte-level primitive change and neither bound is
+   reachable through any protocol path.
+
 Steps 2 and 3 are reproducible against the declared toolchain, and CI resolves
 to that same toolchain.
+
+Step 7 is not lint or format work. It is folded in because step 3 rewrites the
+doc block it lives in, and leaving a known-false bound in lines being rewritten
+would be worse than the drift the rest of this plan removes (owner, August
+2026).
 
 ## 4. What this plan does not solve
 

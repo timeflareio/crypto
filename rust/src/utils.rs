@@ -1,5 +1,5 @@
-use sha2::{Sha256, Digest};
 use hmac::{Hmac, KeyInit, Mac as HmacMac};
+use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -26,9 +26,8 @@ pub enum CryptoError {
 pub fn generate_random_bytes(length: usize) -> Result<Vec<u8>, CryptoError> {
     let mut bytes = vec![0u8; length];
 
-    // Use getrandom directly for WASM compatibility  
-    getrandom::fill(&mut bytes)
-        .map_err(|_| CryptoError::RandomFailed)?;
+    // Use getrandom directly for WASM compatibility
+    getrandom::fill(&mut bytes).map_err(|_| CryptoError::RandomFailed)?;
 
     // Verify we got non-zero bytes (basic sanity check)
     if bytes.iter().all(|&b| b == 0) {
@@ -38,12 +37,15 @@ pub fn generate_random_bytes(length: usize) -> Result<Vec<u8>, CryptoError> {
     Ok(bytes)
 }
 
-
 /// Generate HMAC matching the guardian Go implementation exactly
-pub fn generate_guardian_hmac(secret_id: &str, guardian_address: &str, share_data: &[u8]) -> Vec<u8> {
+pub fn generate_guardian_hmac(
+    secret_id: &str,
+    guardian_address: &str,
+    share_data: &[u8],
+) -> Vec<u8> {
     // Step 1: Generate HMAC key (matching crypto/hmac.go)
     let mut key_hash = Sha256::new();
-    key_hash.update(b"secrets");        // Module name
+    key_hash.update(b"secrets"); // Module name
     key_hash.update(secret_id.as_bytes());
     key_hash.update(guardian_address.as_bytes());
     key_hash.update(b"hmac_salt");
@@ -57,8 +59,6 @@ pub fn generate_guardian_hmac(secret_id: &str, guardian_address: &str, share_dat
 
     mac.finalize().into_bytes().to_vec()
 }
-
-
 
 /// Set up panic hook for better error messages in WASM
 pub fn set_panic_hook() {
@@ -104,7 +104,6 @@ mod tests {
         assert_eq!(bytes2.len(), 32);
         assert_ne!(bytes1, bytes2); // Should be different
     }
-
 
     #[test]
     fn test_guardian_hmac_compatibility() {
