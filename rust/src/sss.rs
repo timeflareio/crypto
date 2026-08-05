@@ -1,37 +1,38 @@
+//! Shamir Secret Sharing implementation for Timeflare
+//!
+//! This module provides a pure Rust implementation of Shamir's Secret Sharing scheme
+//! operating over GF(256). It supports splitting secrets of arbitrary size into shares
+//! where any threshold number of shares can reconstruct the original secret.
+//!
+//! Based on the mathematical foundation of polynomial interpolation over finite fields.
+//!
+//! # Constraints and Limitations
+//!
+//! - **Threshold**: Must be between 2 and 16 (inclusive)
+//!   - Minimum 2 for security (threshold=1 would mean any single share reveals the secret)
+//!   - Maximum 16 for performance and mobile compatibility
+//!
+//! - **Number of Shares**: Must be between threshold and 32 (inclusive)
+//!   - Maximum 32 for reasonable guardian coordination and economics
+//!   - Must be at least equal to threshold for the scheme to work
+//!
+//! - **Secret Size**: Must be between 1 byte and 1MB (inclusive)
+//!   - Each share will be the same size as the secret
+//!   - Memory usage is O(secret_size * num_shares)
+//!   - 1MB maximum ensures mobile compatibility and prevents DoS attacks
+//!   - Total memory usage capped at 50MB
+//!
+//! - **Share IDs**: Automatically assigned from 1 to num_shares
+//!   - ID 0 is reserved and invalid
+//!   - Each share must have a unique ID
+//!
+//! # Security Notes
+//!
+//! - This implementation provides constant-time operations for critical paths
+//! - Random coefficients are generated using ChaCha20Rng for cryptographic security
+//! - Shares can only be validated during reconstruction phase
+
 use rand_chacha::ChaCha20Rng;
-/// Shamir Secret Sharing implementation for Timeflare
-///
-/// This module provides a pure Rust implementation of Shamir's Secret Sharing scheme
-/// operating over GF(256). It supports splitting secrets of arbitrary size into shares
-/// where any threshold number of shares can reconstruct the original secret.
-///
-/// Based on the mathematical foundation of polynomial interpolation over finite fields.
-///
-/// # Constraints and Limitations
-///
-/// - **Threshold**: Must be between 2 and 16 (inclusive)
-///   - Minimum 2 for security (threshold=1 would mean any single share reveals the secret)
-///   - Maximum 16 for performance and mobile compatibility
-///
-/// - **Number of Shares**: Must be between threshold and 32 (inclusive)
-///   - Maximum 32 for reasonable guardian coordination and economics
-///   - Must be at least equal to threshold for the scheme to work
-///
-/// - **Secret Size**: Must be between 1 byte and 1MB (inclusive)
-///   - Each share will be the same size as the secret
-///   - Memory usage is O(secret_size * num_shares)
-///   - 1MB maximum ensures mobile compatibility and prevents DoS attacks
-///   - Total memory usage capped at 50MB
-///
-/// - **Share IDs**: Automatically assigned from 1 to num_shares
-///   - ID 0 is reserved and invalid
-///   - Each share must have a unique ID
-///
-/// # Security Notes
-///
-/// - This implementation provides constant-time operations for critical paths
-/// - Random coefficients are generated using ChaCha20Rng for cryptographic security
-/// - Shares can only be validated during reconstruction phase
 use rand_core::{Rng, SeedableRng};
 use std::collections::HashSet;
 
@@ -201,7 +202,7 @@ pub fn combine_shares(shares: &[Share], threshold: u8) -> Result<Vec<u8>, SssErr
     let shares_to_use: Vec<&Share> = valid_shares
         .iter()
         .take(threshold as usize)
-        .map(|s| *s)
+        .copied()
         .collect();
 
     let mut secret = Vec::with_capacity(expected_len);
@@ -267,6 +268,10 @@ fn lagrange_interpolation(xs: &[u8], ys: &[u8], x: u8) -> Result<u8, SssError> {
 fn validate_secret_size(secret: &[u8]) -> Result<(), SssError> {
     let size = secret.len();
 
+    // MIN_SECRET_SIZE is 0, so this comparison is always false: empty secrets
+    // are valid. The bound is checked anyway so both ends are enforced in one
+    // place, and raising MIN_SECRET_SIZE takes effect here with no other edit.
+    #[allow(clippy::absurd_extreme_comparisons)]
     if size < MIN_SECRET_SIZE {
         return Err(SssError::SecretTooSmall {
             size,
@@ -681,10 +686,7 @@ mod tests {
 
         // Test memory constraints
         let max_secret = vec![0x42; MAX_SECRET_SIZE];
-        assert!(matches!(
-            split_secret(&max_secret, MAX_THRESHOLD, MAX_SHARES),
-            Ok(_)
-        ));
+        assert!(split_secret(&max_secret, MAX_THRESHOLD, MAX_SHARES).is_ok());
     }
 
     #[test]
@@ -937,8 +939,8 @@ mod tests {
         assert_eq!(current, 1, "Generator should return to 1 after 255 steps");
 
         // Verify all non-zero elements were visited
-        for i in 1..=255 {
-            assert!(seen[i], "Generator didn't visit element {}", i);
+        for (element, visited) in seen.iter().enumerate().skip(1) {
+            assert!(visited, "Generator didn't visit element {}", element);
         }
     }
 

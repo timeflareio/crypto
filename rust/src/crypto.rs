@@ -1,13 +1,14 @@
+//! Asymmetric encryption for Timeflare protocol
+//!
+//! This module provides encryption for both guardian share encryption
+//! and recipient secret encryption with a consistent API.
+
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Nonce,
 };
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
-/// Asymmetric encryption for Timeflare protocol
-///
-/// This module provides encryption for both guardian share encryption
-/// and recipient secret encryption with a consistent API.
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -410,7 +411,7 @@ mod tests {
             // Encrypt the data
             let start_time = std::time::Instant::now();
             let encrypted = encrypt_for_public_key(&test_data, &keypair.public_key())
-                .expect(&format!("Failed to encrypt {} bytes", size));
+                .unwrap_or_else(|_| panic!("Failed to encrypt {} bytes", size));
             let encrypt_duration = start_time.elapsed();
 
             // Verify encrypted size is correct (ephemeral_key + nonce + ciphertext + auth_tag)
@@ -426,7 +427,7 @@ mod tests {
             let start_time = std::time::Instant::now();
             let decrypted = keypair
                 .decrypt(&encrypted)
-                .expect(&format!("Failed to decrypt {} bytes", size));
+                .unwrap_or_else(|_| panic!("Failed to decrypt {} bytes", size));
             let decrypt_duration = start_time.elapsed();
 
             // Verify data integrity
