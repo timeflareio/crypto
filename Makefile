@@ -206,8 +206,13 @@ wasm-package: wasm ## Stage the WASM bundle for consumption (used by release.yml
 
 .PHONY: clean
 clean: ## Remove build and test artefacts
+# Scope is what this checkout produces, and nothing else. The Go build cache
+# ($GOCACHE, which also holds cached test results) and cargo's registry cache
+# are machine-global and shared with every sibling repository, so evicting them
+# from here would leave an unrelated repository facing a cold rebuild; Go trims
+# its own cache anyway. To force the suites to re-run rather than replay a
+# cached result, pass -count=1 to `go test`.
 	@rm -rf $(WASM_OUT_DIR) dist rust/target $(COVERAGE_FILE) $(COVERAGE_HTML_FILE)
-	@go clean -cache -testcache 2>/dev/null || true
 	@echo "✅ Cleaned"
 
 .PHONY: doctor
