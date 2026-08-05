@@ -25,13 +25,22 @@ TEST_TIMEOUT          ?= 10m
 COVERAGE_FILE         ?= coverage.out
 COVERAGE_HTML_FILE    ?= coverage.html
 
-# The corpus files this repository owns and publishes. Consumers (TypeScript
-# SDK, mobile client) pin a release and assert these to prove they interoperate
-# with the primitives defined here.
-VECTORS_FILES := detection_hint encryption hmac low_order_keys rebate_commitment
+# The corpus files that travel to consumers, shipped inside the WASM package.
+#
+# These two are the ones an implementation outside this repository asserts:
+# low_order_keys against the SDK's TypeScript guard, which rejects a small-order
+# guardian key before reaching the WASM boundary, and rebate_commitment against
+# the mobile app's TypeScript commitment arithmetic. The rest of the corpus pins
+# this repository's own Go and Rust suites against each other, so it has no
+# consumer to reach.
+VECTORS_TRAVELLING := low_order_keys rebate_commitment
 
 # wasm-pack output directory (published as a release asset, never committed)
 WASM_OUT_DIR ?= pkg
+
+# npm package identity for the WASM bundle. Named for the organisation and the
+# repository it comes from, so a consumer's dependency key matches the artefact.
+WASM_PACKAGE_NAME ?= @timeflareio/crypto
 
 ##@ Testing
 
@@ -144,26 +153,18 @@ rust-audit: ## Audit Rust dependencies (advisory, not in verify)
 
 ##@ Vectors
 
-# vectors/ is OWNED here. It pins the primitives this repository defines, and it
-# is the artefact downstream implementations (TypeScript SDK, mobile client)
-# assert to prove they interoperate. Vectors are append-only: adding cases is
-# ordinary work, changing an existing expected value is a breaking primitive
-# change (see README.md "Versioning").
+# vectors/ is OWNED here. It pins the primitives this repository defines, and
+# `make test` asserts every file from both the Go and the Rust suite. Vectors are
+# append-only: adding cases is ordinary work, changing an existing expected value
+# is a breaking primitive change (see README.md "Versioning").
 #
 # There is no sync or verify step, and deliberately so: this repository is the
 # source of these vectors, not a consumer of someone else's copy.
-
-.PHONY: vectors-package
-vectors-package: ## Package the owned corpus with a SHA-256 manifest (used by release.yml)
-	@set -e; \
-	out="$${OUT_DIR:-dist}"; \
-	ver="$${VERSION:-dev}"; \
-	mkdir -p "$$out"; \
-	tar -czf "$$out/timeflare-crypto-vectors-$$ver.tar.gz" \
-		$(foreach v,$(VECTORS_FILES),-C "$(CURDIR)" vectors/$(v).json); \
-	( cd vectors && shasum -a 256 $(foreach v,$(VECTORS_FILES),$(v).json) ) \
-		> "$$out/timeflare-crypto-vectors-$$ver.sha256"; \
-	echo "✅ corpus packaged in $$out/"
+#
+# The two files an outside implementation asserts travel inside the WASM package
+# (VECTORS_TRAVELLING, staged by wasm-package). The rest hold this repository's
+# own two implementations together and have no consumer to reach, so they are not
+# published separately.
 
 ##@ Build
 
@@ -176,6 +177,30 @@ $(WASM_OUT_DIR)/timeflare_crypto.js: $(shell find rust/src -name '*.rs') rust/Ca
 	@echo "🦀 Building WASM crypto (rust -> $(WASM_OUT_DIR))"
 	@cd rust && wasm-pack build --target web --out-dir ../$(WASM_OUT_DIR)
 	@echo "✅ WASM built in $(WASM_OUT_DIR)/"
+
+.PHONY: wasm-package
+wasm-package: wasm ## Stage the WASM bundle for consumption (used by release.yml)
+	@set -e; \
+	dir="$(WASM_OUT_DIR)"; \
+	ver="$${VERSION:-0.0.0-dev}"; ver="$${ver#v}"; \
+	[ -f "$$dir/package.json" ] || { \
+		echo "❌ $$dir/package.json is absent — wasm-pack did not produce a package"; \
+		exit 1; }; \
+	mkdir -p "$$dir/vectors"; \
+	for v in $(VECTORS_TRAVELLING); do \
+		cp "vectors/$$v.json" "$$dir/vectors/$$v.json"; \
+	done; \
+	tmp="$$(mktemp)"; \
+	sed -e 's|"name": *"[^"]*"|"name": "$(WASM_PACKAGE_NAME)"|' \
+	    -e 's|"version": *"[^"]*"|"version": "'"$$ver"'"|' \
+	    "$$dir/package.json" > "$$tmp"; \
+	mv "$$tmp" "$$dir/package.json"; \
+	grep -q '"name": "$(WASM_PACKAGE_NAME)"' "$$dir/package.json" || { \
+		echo "❌ the package name was not rewritten — check wasm-pack's output format"; \
+		exit 1; }; \
+	grep -q "\"version\": \"$$ver\"" "$$dir/package.json" || { \
+		echo "❌ the package version was not rewritten to $$ver"; exit 1; }; \
+	echo "✅ $(WASM_PACKAGE_NAME)@$$ver staged in $$dir/ with $(VECTORS_TRAVELLING)"
 
 ##@ Misc
 

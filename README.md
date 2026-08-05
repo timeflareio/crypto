@@ -64,11 +64,11 @@ Rust toolchain.
 
 ## Versioning
 
-**One tag, three artefacts.** The Go module, the WASM bundle and the vector
-corpus share a single version line. They come from one tree, so a Rust-only
-change does bump the Go module for no functional reason — accepted deliberately,
-because a no-op version bump costs a consumer nothing, whereas several tag
-namespaces in one repository costs everyone something.
+**One tag, two artefacts.** The Go module and the WASM package share a single
+version line. They come from one tree, so a Rust-only change does bump the Go
+module for no functional reason — accepted deliberately, because a no-op version
+bump costs a consumer nothing, whereas several tag namespaces in one repository
+costs everyone something.
 
 **This module versions independently of the chain.** A release here neither
 waits for nor implies a chain release; it is a dependency with its own upgrade
@@ -102,15 +102,25 @@ implemented — twice, and the corpus is what stops those two copies diverging. 
 generator that produces the cases lives here too
 (`TestGenerateVectors` in `go/vectors_test.go`).
 
-It is also a **published artefact**. Downstream implementations that reimplement
-these primitives for runtimes the Go and WASM builds cannot reach — the mobile
-client's native crypto layer, and the TypeScript SDK's own checks — pin a release
-and assert the corpus to prove they interoperate:
+**Two of the five travel.** An implementation outside this repository asserts
+`low_order_keys.json` — the SDK's TypeScript guard, which refuses a small-order
+guardian key before the WASM boundary so the creator learns which guardian is at
+fault — and `rebate_commitment.json`, which the mobile app computes in TypeScript.
+Both ship inside the WASM package, so a consumer that resolves the package has
+them:
 
 ```
-timeflare-crypto-vectors-vX.Y.Z.tar.gz     # the five files, per release
-timeflare-crypto-vectors-vX.Y.Z.sha256     # per-file manifest
+@timeflareio/crypto
+└── vectors/
+    ├── low_order_keys.json
+    └── rebate_commitment.json
 ```
+
+The other three — `hmac.json`, `encryption.json`, `detection_hint.json` — hold the
+Go and Rust suites in this repository against each other. Both suites are here, so
+those files reach no consumer and are not published. The mobile client's native
+layer wraps this crate through UniFFI rather than reimplementing it, which is why
+it needs a fixture for the binding rather than the corpus.
 
 Vectors are append-only. Adding cases is ordinary work; **changing an existing
 expected value means the primitives now produce different bytes**, which

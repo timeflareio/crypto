@@ -25,8 +25,8 @@ implementations:
   published here.
 
 `go.mod` sits at the repository root rather than in `go/`, so one plain
-`vX.Y.Z` tag serves all three published artefacts — Go module, WASM bundle and
-vector corpus — and `go test ./...` works from the root.
+`vX.Y.Z` tag serves both published artefacts — the Go module and the WASM
+package — and `go test ./...` works from the root.
 
 ## 🚨 A change to one implementation MUST land in the other
 
@@ -81,11 +81,21 @@ the generator that produces the cases is here
 against anyone else's copy, deliberately: this repository is self-contained, and
 `make test` needs no network and no credentials.
 
-Releases publish the corpus with a SHA-256 manifest, because downstream
-implementations that reimplement these primitives for runtimes Go and WASM cannot
-reach — the mobile client's native layer especially — assert it to prove they
-interoperate. Adding cases is ordinary work. Changing an existing expected value
-is the protocol change described below.
+Two of the files travel, shipped inside the WASM package: `low_order_keys.json`,
+which the SDK's TypeScript guard asserts when it rejects a small-order guardian
+key before the WASM boundary, and `rebate_commitment.json`, which the mobile app's
+TypeScript commitment arithmetic asserts. Those are implementations outside this
+repository, so a shared expected output is the only thing holding them to what is
+defined here.
+
+The other three reach no consumer. `hmac.json`, `encryption.json` and
+`detection_hint.json` pin the Go suite against the Rust suite, and both live here;
+the mobile client's native layer wraps this crate through UniFFI rather than
+reimplementing it, so it asserts the binding, not the primitives. They are not
+published.
+
+Adding cases is ordinary work. Changing an existing expected value is the protocol
+change described below.
 
 The chain repository keeps a separate corpus for chain semantics (gas, dials,
 share bands, creation fees, wallet derivation). Those files are not mirrored here
@@ -131,7 +141,8 @@ otherwise — do not propose 1.0.0.
 - `make verify` — read-only Go checks (gofmt, imports, vet, golangci-lint)
 - `make clean-code` — fix everything fixable
 - `make wasm` — build the WASM bundle from the Rust crate into `pkg/`
-- `make vectors-package` — package the owned corpus + manifest (used by releases)
+- `make wasm-package` — stage `pkg/` for consumption: the travelling vectors, and
+  the package's name and version (used by releases; `VERSION=vX.Y.Z`)
 - `make doctor` — check the local toolchain
 - `make help` — grouped target list
 
