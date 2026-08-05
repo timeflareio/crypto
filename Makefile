@@ -25,6 +25,12 @@ TEST_TIMEOUT          ?= 10m
 COVERAGE_FILE         ?= coverage.out
 COVERAGE_HTML_FILE    ?= coverage.html
 
+# Saturation settings for `make fuzz`, both overridable so a long run before a
+# release and a short one mid-change are the same target. PROPTEST_CASES is read
+# by proptest itself; its own default is 256.
+FUZZTIME       ?= 30s
+PROPTEST_CASES ?= 4096
+
 # The corpus files that travel to consumers, shipped inside the WASM package.
 #
 # These two are the ones an implementation outside this repository asserts:
@@ -66,6 +72,30 @@ rust-test: ## Run the Rust test suite
 	@echo "--> Rust tests"
 	@cd rust && cargo test
 	@echo "✅ Rust tests passed"
+
+# Deliberately in neither `verify` nor `test`. Both of those are bounded and
+# hermetic; an unbounded search belongs to a run someone chose to start. The
+# regression half needs no target at all — seeds under go/testdata/fuzz/ and
+# proptest-regressions/ replay under `make test` as ordinary cases, so a crash
+# found once is asserted for good, offline and at no cost.
+#
+# There is no scheduled CI job for this, by decision: the durable artefact is
+# the corpus, not the runner minutes. Anything this run finds must be committed
+# to be worth having.
+#
+# The Go target list is read from the source rather than repeated here, so a new
+# FuzzXxx is picked up by adding it and nothing else.
+.PHONY: fuzz
+fuzz: ## Search for new crashes (FUZZTIME=30s PROPTEST_CASES=4096)
+	@set -e; \
+	for target in $$(grep -o '^func Fuzz[A-Za-z0-9_]*' go/fuzz_test.go | sed 's/^func //'); do \
+		echo "--> $$target ($(FUZZTIME))"; \
+		go test ./go/ -run '^$$' -fuzz="^$$target$$" -fuzztime=$(FUZZTIME); \
+	done
+	@echo "--> Rust property suite (PROPTEST_CASES=$(PROPTEST_CASES))"
+	@cd rust && PROPTEST_CASES=$(PROPTEST_CASES) cargo test property_tests
+	@echo "✅ Fuzzing run complete"
+	@echo "ℹ  Commit anything new under go/testdata/fuzz/ or rust/proptest-regressions/"
 
 ##@ Code quality
 
