@@ -6,7 +6,10 @@ Shamir implementation, fuzz coverage of every function on both sides that parses
 attacker-controlled bytes, and a written position on the two things testing
 cannot reach.*
 
-> **Status: ready** — August 2026. Every open item is settled.
+> **Status: in progress** — executed August 2026 on `worktree-crypto-assurance`.
+> All three phases are implemented and `make verify && make test` is green; §5
+> records what the run found, including one unresolved cross-implementation
+> difference that needs a ruling before this is marked done.
 > **Priority**: P1 — audit readiness. Nothing here fixes a known defect; it is
 > the evidence an external audit and mainnet custody of real secrets will ask
 > for, and it is cheapest to build before a corpus of live secrets exists.
@@ -70,15 +73,10 @@ Cover:
   trips; truncated, oversized and bit-flipped ciphertexts return an error rather
   than panicking.
 
-Two documentation defects in `sss.rs` surface here and are fixed as part of the
-phase, because a property test written against the doc comment would be written
-against the wrong bound:
-
-- The header states secrets must be "between 1 byte and 1MB", while
-  `MIN_SECRET_SIZE` is `0` and empty secrets are deliberately accepted.
-- The header claims "constant-time operations for critical paths", which
-  overclaims for the GF(256) table lookups. It is corrected to match the
-  position §4 records.
+The `sss.rs` header claims "constant-time operations for critical paths", which
+overclaims for the GF(256) table lookups. It is corrected here to match the
+position §4 records, because a property test written against a doc comment that
+misdescribes the code is written against the wrong thing.
 
 ## 3. Phase 2 — fuzzing
 
@@ -147,7 +145,45 @@ raise both regardless of what the tests say.
   material the channel would leak. The `sss.rs` header claim is corrected to
   agree (§2).
 
-## 5. What this plan does not solve
+## 5. What execution found
+
+Fifty property and randomised-input tests on the Rust side and seven fuzz
+targets on the Go side, run to saturation locally. No crash, no panic and no
+false accept was found in either implementation. Three characteristics were,
+none of them a defect in what the code does, all three now pinned by a test so
+that changing them is deliberate:
+
+- **Two single-bit tampers are inert rather than caught**, and the first
+  formulation of the tamper properties was wrong to assert otherwise. X25519
+  clamps the scalar (RFC 7748 clears bits 0–2 of byte 0 and rewrites bits 6–7 of
+  byte 31) and masks the top bit of a public key's u-coordinate, so a
+  perturbation confined to those positions reconstructs to the same key. The
+  properties assert what actually matters — a tamper never yields a *different*
+  payload — and `clamped_scalar_bits_do_not_affect_the_key`,
+  `the_masked_u_coordinate_bit_does_not_change_the_plaintext` and their
+  complements fix the inert set at exactly five bits and one bit respectively.
+  Detecting envelope tampering is the guardian HMAC's job, and it does it.
+- **`rebate_commitment` concatenates its two inputs without a length prefix**,
+  so the split between `z` and the collector address is not itself committed to.
+  Every call site passes a 32-byte `z` straight from X25519 and a fixed-length
+  address, which is what makes the split unambiguous in practice.
+  `rebate_commitment_does_not_commit_to_the_input_split` records the property so
+  that a future call site with a variable-length argument fails a test rather
+  than shipping.
+- **The two implementations disagree on the empty payload.**
+  `go/encryption.go:33` refuses to encrypt zero bytes; `encrypt_for_public_key`
+  in Rust accepts them and round-trips correctly. The corpus pins agreed
+  outputs and has no case for a rejection, which is how this has stayed
+  invisible. `FuzzDecryptShareRoundTrip` now asserts the Go behaviour in both
+  directions so it cannot drift further unnoticed.
+
+  **This is unresolved and outside this plan's scope**, which covers finding
+  such a thing rather than landing the fix: reconciling it changes what a shared
+  primitive accepts, and that is a protocol change needing the owner's ruling,
+  both implementations, a vector case and a consumer roll. Until then the two
+  sides differ on one input.
+
+## 6. What this plan does not solve
 
 - **No behaviour change.** If a property or fuzz failure turns out to need a
   byte-level fix to a shared primitive, that is a protocol change and it stops
