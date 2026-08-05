@@ -5,8 +5,8 @@ adds both to `make verify` and CI. The crate has never been gated on either:
 the monorepo's Rust CI job ran `cargo test` and `cargo audit` only, so the debt
 arrived with the lift rather than being created by it.*
 
-> **Status: ready** — August 2026. Created alongside the phase-1 lift; scope is
-> known and small, and every open item is settled.
+> **Status: done** — August 2026, landed in PR #8 from `worktree-rust-hygiene`
+> with all three CI checks green. Created alongside the phase-1 lift.
 > **Priority**: P3 — pure hygiene. No behaviour change, no consumer impact.
 > Worth doing because an ungated formatter is a permanent source of diff noise,
 > and because one of the six clippy findings marks genuinely dead code.
@@ -58,6 +58,11 @@ All three parts have consequences beyond tidiness:
   unpinned while behaving as pinned — so §3 has it say so in a comment, rather
   than restate the version somewhere it could drift out of agreement with the
   file that would win regardless.
+
+  PR #8's run bears this out. The runner's stable was 1.97.1; the moment the
+  Verify step ran cargo from `rust/`, rustup synced 1.97.0 and downloaded its
+  six declared components. The gate runs on the pinned toolchain, one patch
+  below what the action installed.
 
 ## 2. The findings
 

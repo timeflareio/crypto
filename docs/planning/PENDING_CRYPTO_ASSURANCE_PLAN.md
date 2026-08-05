@@ -159,7 +159,9 @@ raise both regardless of what the tests say.
   nothing is a proof obligation, not a test.
 - **Timing is not measured.** Property tests and fuzzers observe outputs, not
   memory-access patterns. §4 is the whole of the answer.
-- **Lint and format conformance** belong to `PENDING_RUST_HYGIENE_PLAN.md`,
-  which explicitly scopes test coverage out to here. That plan should land
-  first: a `cargo fmt` pass rewriting 685 lines across these same files would
-  otherwise collide with every test module this plan adds.
+- **Lint and format conformance** belong to `done/DONE_RUST_HYGIENE_PLAN.md`,
+  which explicitly scopes test coverage out to here. That plan has landed, so
+  its `cargo fmt` pass — 858 lines across these same files — is already in
+  `main` and cannot collide with the test modules this plan adds. Those modules
+  do have to arrive `cargo fmt --check` and `clippy -D warnings` clean, since
+  `make verify` now gates on both.
