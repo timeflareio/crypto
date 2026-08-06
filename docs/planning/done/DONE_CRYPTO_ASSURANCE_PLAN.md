@@ -8,9 +8,8 @@ cannot reach.*
 
 > **Status: done** — August 2026, executed on `worktree-crypto-assurance`. All
 > three phases landed and `make verify && make test` is green. §5 records what
-> the run found; the empty-payload difference it surfaced is a protocol question
-> this plan deliberately does not answer, and is handed off there rather than
-> held open here.
+> the run found, including the empty-payload difference between the two
+> implementations and the ruling that closed it.
 > **Priority**: P1 — audit readiness. Nothing here fixes a known defect; it is
 > the evidence an external audit and mainnet custody of real secrets will ask
 > for, and it is cheapest to build before a corpus of live secrets exists.
@@ -178,11 +177,19 @@ that changing them is deliberate:
   invisible. `FuzzDecryptShareRoundTrip` now asserts the Go behaviour in both
   directions so it cannot drift further unnoticed.
 
-  **This is unresolved and outside this plan's scope**, which covers finding
-  such a thing rather than landing the fix: reconciling it changes what a shared
-  primitive accepts, and that is a protocol change needing the owner's ruling,
-  both implementations, a vector case and a consumer roll. Until then the two
-  sides differ on one input.
+  **Ruled by the owner (August 2026): Rust gains the guard.** An empty payload
+  encrypts to a well-formed envelope carrying nothing, which every layer above
+  treats as a real secret — the chain stores it, guardians bond against it, a
+  recipient waits out the timer for nothing. `encrypt_for_public_key` now
+  refuses it at the same boundary and with the same message as the Go entry
+  point, and `seal_secret` inherits the rejection. No produced bytes change: an
+  input that was accepted is now refused, and everything still accepted encrypts
+  identically, so no existing secret, share or hint is affected.
+
+  The chain needs no change. It caps the maximum payload (spec.md, 4,216B) and
+  says nothing about a minimum; `message_distribute_shares.go` rejects an empty
+  *ciphertext*, which an empty payload never produced — it yielded a valid
+  120-byte one. Nothing on chain could observe the difference.
 
 ## 6. What this plan does not solve
 
@@ -202,6 +209,10 @@ that changing them is deliberate:
   `main` and cannot collide with the test modules this plan adds. Those modules
   do have to arrive `cargo fmt --check` and `clippy -D warnings` clean, since
   `make verify` now gates on both.
-- **The empty-payload difference in §5 is left open.** It is handed to whoever
-  rules on it, with both sides' behaviour asserted in the meantime so it cannot
-  widen unobserved. Nothing else in this repository is blocked on that ruling.
+- **The corpus still cannot pin a shared rejection.** `encryption.json` is a
+  list of accept cases — plaintext in, ciphertext out — so the empty-payload
+  boundary of §5 is held by an assertion in each suite rather than by a vector.
+  That is weaker than the rest of the corpus: the two suites agree today because
+  both were written to, not because a shared file forces them to. Giving
+  `encryption.json` a reject section, the shape `low_order_keys.json` already
+  uses, would close it. It needs the owner's approval and is not done here.

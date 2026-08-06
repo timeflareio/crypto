@@ -88,11 +88,10 @@ func FuzzDecryptShareRoundTrip(f *testing.F) {
 
 		envelope, err := EncryptShareWithPublicKey(data, keypair.PublicKey)
 
-		// This implementation refuses an empty payload. The Rust one encrypts
-		// it, so the two disagree on the empty input alone; the shared corpus
-		// pins agreed outputs and has no case for a rejection, which is how the
-		// difference has stayed invisible. Asserted in both directions here so
-		// that whichever way it is reconciled, it is reconciled deliberately.
+		// An empty payload is refused, here and in the Rust implementation, at
+		// the same boundary. The corpus pins agreed outputs and so cannot pin a
+		// shared rejection; asserting the boundary from both suites is what
+		// holds the two sides to the same answer.
 		if len(data) == 0 {
 			if err == nil {
 				t.Fatal("an empty payload was encrypted, which this side refuses")

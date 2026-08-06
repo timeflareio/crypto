@@ -561,6 +561,33 @@ mod property_tests {
     /// it here means the property test above is not the only place a reader
     /// learns of it. Nothing is lost by it: the recovered key, and so the
     /// recovered payload, is the correct one either way.
+    /// Sealing an empty payload is refused, because the inner encryption that
+    /// starts the seal refuses it. Asserted at this level too: `seal_secret` is
+    /// the entry point a client actually calls, and nothing about the seal
+    /// composition guarantees that an inner rejection keeps surfacing here.
+    #[test]
+    fn sealing_an_empty_payload_is_refused() {
+        let recipient = TimeflareKeypair::generate();
+        let (guardians, _) = test_guardians(3);
+
+        assert!(
+            matches!(
+                seal_secret(&[], &recipient.public_key_bytes(), &guardians, 2, SECRET_ID),
+                Err(CryptoError::InvalidInput(_))
+            ),
+            "an empty payload must not be sealable"
+        );
+
+        assert!(seal_secret(
+            b"x",
+            &recipient.public_key_bytes(),
+            &guardians,
+            2,
+            SECRET_ID
+        )
+        .is_ok());
+    }
+
     #[test]
     fn clamped_scalar_bits_do_not_affect_the_key() {
         let base = [0x5au8; 32];
@@ -611,7 +638,7 @@ mod property_tests {
         /// unseal → recipient decrypts, ending at the original bytes.
         #[test]
         fn seal_then_unseal_is_the_identity(
-            payload in prop::collection::vec(any::<u8>(), 0..=256),
+            payload in prop::collection::vec(any::<u8>(), 1..=256),
             (threshold, guardian_count) in threshold_and_guardians(),
         ) {
             let (sealed, revealed, recipient) =

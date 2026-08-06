@@ -169,6 +169,17 @@ pub fn encrypt_for_public_key(
     data: &[u8],
     public_key: &TimeflarePublicKey,
 ) -> Result<Vec<u8>, CryptoError> {
+    // An empty payload encrypts to a well-formed 60-byte envelope carrying no
+    // plaintext, which every layer above treats as a real secret: the chain
+    // stores it, guardians bond against it and a recipient waits out the timer
+    // for nothing. Refused here, at the same boundary and for the same reason
+    // as the Go implementation, so the two agree on what is encryptable.
+    if data.is_empty() {
+        return Err(CryptoError::InvalidInput(
+            "data to encrypt cannot be empty".to_string(),
+        ));
+    }
+
     // Generate ephemeral keypair for ECDH
     let mut rng = wasm_compatible_rng()?;
     let ephemeral_secret = StaticSecret::random_from_rng(&mut rng);
@@ -704,6 +715,24 @@ mod property_tests {
     /// than "always an error".
     const MASKED_U_COORDINATE_BIT: (usize, u32) = (31, 7);
 
+    /// An empty payload is refused, at every entry point that reaches
+    /// encryption. Both implementations of this primitive draw the line in the
+    /// same place; the corpus pins agreed outputs and so cannot pin a shared
+    /// rejection, which is why this is asserted here and in the Go suite rather
+    /// than as a vector.
+    #[test]
+    fn an_empty_payload_is_refused() {
+        let keypair = TimeflareKeypair::generate();
+
+        let err = encrypt_for_public_key(&[], &keypair.public_key())
+            .expect_err("an empty payload must be refused");
+        assert!(matches!(err, CryptoError::InvalidInput(_)));
+
+        // A single byte is the smallest thing that is accepted, so the boundary
+        // is exactly at zero rather than somewhere above it.
+        assert!(encrypt_for_public_key(b"x", &keypair.public_key()).is_ok());
+    }
+
     #[test]
     fn the_masked_u_coordinate_bit_does_not_change_the_plaintext() {
         let plaintext = b"the launch codes are 0000";
@@ -750,7 +779,7 @@ mod property_tests {
     proptest! {
         /// Arbitrary plaintext survives a round trip unchanged.
         #[test]
-        fn encrypt_then_decrypt_is_the_identity(plaintext in prop::collection::vec(any::<u8>(), 0..=512)) {
+        fn encrypt_then_decrypt_is_the_identity(plaintext in prop::collection::vec(any::<u8>(), 1..=512)) {
             let keypair = TimeflareKeypair::generate();
             let ciphertext = encrypt_for_public_key(&plaintext, &keypair.public_key())
                 .expect("encryption to a generated key succeeds");
