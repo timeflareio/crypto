@@ -6,10 +6,11 @@ Shamir implementation, fuzz coverage of every function on both sides that parses
 attacker-controlled bytes, and a written position on the two things testing
 cannot reach.*
 
-> **Status: in progress** — executed August 2026 on `worktree-crypto-assurance`.
-> All three phases are implemented and `make verify && make test` is green; §5
-> records what the run found, including one unresolved cross-implementation
-> difference that needs a ruling before this is marked done.
+> **Status: done** — August 2026, executed on `worktree-crypto-assurance`. All
+> three phases landed and `make verify && make test` is green. §5 records what
+> the run found; the empty-payload difference it surfaced is a protocol question
+> this plan deliberately does not answer, and is handed off there rather than
+> held open here.
 > **Priority**: P1 — audit readiness. Nothing here fixes a known defect; it is
 > the evidence an external audit and mainnet custody of real secrets will ask
 > for, and it is cheapest to build before a corpus of live secrets exists.
@@ -201,3 +202,6 @@ that changing them is deliberate:
   `main` and cannot collide with the test modules this plan adds. Those modules
   do have to arrive `cargo fmt --check` and `clippy -D warnings` clean, since
   `make verify` now gates on both.
+- **The empty-payload difference in §5 is left open.** It is handed to whoever
+  rules on it, with both sides' behaviour asserted in the meantime so it cannot
+  widen unobserved. Nothing else in this repository is blocked on that ruling.
