@@ -230,7 +230,7 @@ pub fn unseal_secret(
 mod tests {
     use super::*;
 
-    fn test_guardians(n: usize) -> (Vec<GuardianRecipient>, Vec<TimeflareKeypair>) {
+    pub(super) fn test_guardians(n: usize) -> (Vec<GuardianRecipient>, Vec<TimeflareKeypair>) {
         let mut guardians = Vec::with_capacity(n);
         let mut keypairs = Vec::with_capacity(n);
         for i in 0..n {
@@ -486,6 +486,409 @@ mod tests {
                 .collect();
             let recovered = combine_key_shares(&envelopes[..3], 3).unwrap();
             assert_eq!(recovered, sk);
+        }
+    }
+}
+
+/// Property and randomised-input tests for the seal/unseal pair.
+///
+/// `unseal_secret` is the client-side counterpart of the guardian's decrypt
+/// path: every argument — the revealed envelopes, the payload ciphertext, the
+/// commitment — comes from chain state, so all of it is attacker-influenced.
+/// The properties assert the round trip holds for arbitrary inputs, that any
+/// single-byte tamper is caught, and that no input reaches a panic.
+///
+/// Case count is `PROPTEST_CASES` (default 256). `make fuzz` raises it.
+#[cfg(test)]
+mod property_tests {
+    use super::tests::test_guardians;
+    use super::*;
+    use proptest::prelude::*;
+
+    const SECRET_ID: &str = "9f2c1a34-0000-4000-8000-0000000000ff";
+
+    /// A `(threshold, guardians)` pair. The ceilings stay below the SSS bands of
+    /// 16 and 32: every case seals afresh, which means a keypair and an X25519
+    /// encryption per guardian, and the band extremes are already covered by the
+    /// boundary unit tests above. What varies here is the relationship between
+    /// the two, which is what the properties are about.
+    fn threshold_and_guardians() -> impl Strategy<Value = (u8, usize)> {
+        (2u8..=6).prop_flat_map(|threshold| {
+            (
+                Just(threshold),
+                (threshold as usize)..=(threshold as usize + 6),
+            )
+        })
+    }
+
+    /// Seal `payload`, then decrypt `count` guardians' envelopes back to the
+    /// plaintext form they later reveal on chain.
+    fn seal_and_reveal(
+        payload: &[u8],
+        threshold: u8,
+        guardian_count: usize,
+        reveal: usize,
+    ) -> (SealedSecret, Vec<Vec<u8>>, TimeflareKeypair) {
+        let recipient = TimeflareKeypair::generate();
+        let (guardians, guardian_keys) = test_guardians(guardian_count);
+        let sealed = seal_secret(
+            payload,
+            &recipient.public_key_bytes(),
+            &guardians,
+            threshold,
+            SECRET_ID,
+        )
+        .expect("valid parameters seal successfully");
+
+        let revealed = guardian_keys
+            .iter()
+            .take(reveal)
+            .enumerate()
+            .map(|(i, kp)| kp.decrypt(&sealed.key_shares[i].encrypted_share).unwrap())
+            .collect();
+
+        (sealed, revealed, recipient)
+    }
+
+    /// The five scalar bits X25519 overwrites before use, as
+    /// `(byte index, bit)` — RFC 7748 clears bits 0–2 of byte 0, clears bit 7
+    /// of byte 31 and sets bit 6 of byte 31.
+    const CLAMPED_BITS: [(usize, u32); 5] = [(0, 0), (0, 1), (0, 2), (31, 6), (31, 7)];
+
+    /// Two sk_s values differing only in clamped bits are the same key.
+    ///
+    /// This is why reconstruction can succeed on a tampered share, and stating
+    /// it here means the property test above is not the only place a reader
+    /// learns of it. Nothing is lost by it: the recovered key, and so the
+    /// recovered payload, is the correct one either way.
+    /// Sealing an empty payload is refused, because the inner encryption that
+    /// starts the seal refuses it. Asserted at this level too: `seal_secret` is
+    /// the entry point a client actually calls, and nothing about the seal
+    /// composition guarantees that an inner rejection keeps surfacing here.
+    #[test]
+    fn sealing_an_empty_payload_is_refused() {
+        let recipient = TimeflareKeypair::generate();
+        let (guardians, _) = test_guardians(3);
+
+        assert!(
+            matches!(
+                seal_secret(&[], &recipient.public_key_bytes(), &guardians, 2, SECRET_ID),
+                Err(CryptoError::InvalidInput(_))
+            ),
+            "an empty payload must not be sealable"
+        );
+
+        assert!(seal_secret(
+            b"x",
+            &recipient.public_key_bytes(),
+            &guardians,
+            2,
+            SECRET_ID
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn clamped_scalar_bits_do_not_affect_the_key() {
+        let base = [0x5au8; 32];
+        let expected = TimeflareKeypair::from_bytes(base).public_key_bytes();
+
+        for (byte, bit) in CLAMPED_BITS {
+            let mut altered = base;
+            altered[byte] ^= 1 << bit;
+            assert_ne!(altered, base, "the flip must change the scalar bytes");
+            assert_eq!(
+                TimeflareKeypair::from_bytes(altered).public_key_bytes(),
+                expected,
+                "flipping byte {} bit {} must not change the derived key",
+                byte,
+                bit
+            );
+        }
+    }
+
+    /// Every bit outside that set does change the key, so the inert set is
+    /// exactly five bits wide and no wider.
+    #[test]
+    fn unclamped_scalar_bits_do_affect_the_key() {
+        let base = [0x5au8; 32];
+        let expected = TimeflareKeypair::from_bytes(base).public_key_bytes();
+
+        for byte in 0..32usize {
+            for bit in 0..8u32 {
+                if CLAMPED_BITS.contains(&(byte, bit)) {
+                    continue;
+                }
+                let mut altered = base;
+                altered[byte] ^= 1 << bit;
+                assert_ne!(
+                    TimeflareKeypair::from_bytes(altered).public_key_bytes(),
+                    expected,
+                    "flipping byte {} bit {} must change the derived key",
+                    byte,
+                    bit
+                );
+            }
+        }
+    }
+
+    proptest! {
+        /// The full protocol path holds for arbitrary payloads and arbitrary
+        /// valid guardian arrangements: seal → guardians decrypt → reveal →
+        /// unseal → recipient decrypts, ending at the original bytes.
+        #[test]
+        fn seal_then_unseal_is_the_identity(
+            payload in prop::collection::vec(any::<u8>(), 1..=256),
+            (threshold, guardian_count) in threshold_and_guardians(),
+        ) {
+            let (sealed, revealed, recipient) =
+                seal_and_reveal(&payload, threshold, guardian_count, threshold as usize);
+
+            let inner = unseal_secret(
+                &revealed,
+                threshold,
+                &sealed.payload_ciphertext,
+                &sealed.commitment,
+                Some(&sealed.secret_public_key),
+            )
+            .expect("a threshold-sized reveal unseals");
+
+            prop_assert_eq!(recipient.decrypt(&inner).unwrap(), payload);
+        }
+
+        /// Every guardian's HMAC binds its own plaintext envelope, so the chain
+        /// can attribute a bad reveal to the guardian that made it.
+        #[test]
+        fn revealed_envelopes_match_their_hmacs(
+            payload in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, guardian_count) in threshold_and_guardians(),
+        ) {
+            let recipient = TimeflareKeypair::generate();
+            let (guardians, guardian_keys) = test_guardians(guardian_count);
+            let sealed = seal_secret(
+                &payload,
+                &recipient.public_key_bytes(),
+                &guardians,
+                threshold,
+                SECRET_ID,
+            )
+            .unwrap();
+
+            for (i, kp) in guardian_keys.iter().enumerate() {
+                let envelope = kp.decrypt(&sealed.key_shares[i].encrypted_share).unwrap();
+                prop_assert_eq!(envelope.len(), KEY_SHARE_ENVELOPE_LEN);
+                prop_assert_eq!(envelope[0], KEY_SHARE_ENVELOPE_VERSION);
+                let hmac = generate_guardian_hmac(SECRET_ID, &guardians[i].address, &envelope);
+                prop_assert_eq!(&hmac, &sealed.key_shares[i].share_hmac);
+            }
+        }
+
+        /// Flipping any single bit of any revealed envelope cannot produce a
+        /// *different* payload: the tamper is either caught, or it is inert.
+        ///
+        /// Inert is the interesting half, and it is not a defect. The shared
+        /// secret is a raw X25519 scalar, and X25519 clamps before use — bits
+        /// 0–2 of byte 0 and bits 6–7 of byte 31 are overwritten (RFC 7748), so
+        /// a perturbation confined to them reconstructs a scalar that differs
+        /// byte-wise while clamping to the same key. Reconstruction then
+        /// succeeds and yields the correct payload, which is why the assertion
+        /// is "never a wrong answer" rather than "always an error". Detecting
+        /// the tamper itself is the guardian HMAC's job, not this path's — see
+        /// `revealed_envelopes_match_their_hmacs`, which is what the chain
+        /// checks before a reveal is accepted.
+        #[test]
+        fn a_tampered_envelope_never_yields_a_different_payload(
+            payload in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, guardian_count) in threshold_and_guardians(),
+            which: prop::sample::Index,
+            byte_index: prop::sample::Index,
+            bit in 0u32..8,
+        ) {
+            let (sealed, revealed, _) =
+                seal_and_reveal(&payload, threshold, guardian_count, threshold as usize);
+
+            let untampered = unseal_secret(
+                &revealed,
+                threshold,
+                &sealed.payload_ciphertext,
+                &sealed.commitment,
+                Some(&sealed.secret_public_key),
+            )
+            .expect("the untampered reveal unseals");
+
+            let mut tampered = revealed;
+            let target = which.index(tampered.len());
+            tampered[target][byte_index.index(KEY_SHARE_ENVELOPE_LEN)] ^= 1 << bit;
+
+            match unseal_secret(
+                &tampered,
+                threshold,
+                &sealed.payload_ciphertext,
+                &sealed.commitment,
+                Some(&sealed.secret_public_key),
+            ) {
+                Err(_) => {}
+                Ok(inner) => prop_assert_eq!(inner, untampered),
+            }
+        }
+
+        /// Flipping any single bit of the on-chain payload ciphertext never
+        /// yields a different payload: the outer AEAD catches it, or — for the
+        /// masked top bit of the outer ephemeral key's u-coordinate — it is
+        /// inert and the commitment still holds. Same reasoning as
+        /// `crypto::property_tests::MASKED_U_COORDINATE_BIT`.
+        #[test]
+        fn a_tampered_payload_ciphertext_never_yields_a_different_payload(
+            payload in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, guardian_count) in threshold_and_guardians(),
+            byte_index: prop::sample::Index,
+            bit in 0u32..8,
+        ) {
+            let (sealed, revealed, _) =
+                seal_and_reveal(&payload, threshold, guardian_count, threshold as usize);
+
+            let untampered = unseal_secret(
+                &revealed,
+                threshold,
+                &sealed.payload_ciphertext,
+                &sealed.commitment,
+                Some(&sealed.secret_public_key),
+            )
+            .expect("the untampered ciphertext unseals");
+
+            let mut tampered = sealed.payload_ciphertext.clone();
+            let index = byte_index.index(tampered.len());
+            tampered[index] ^= 1 << bit;
+
+            match unseal_secret(
+                &revealed,
+                threshold,
+                &tampered,
+                &sealed.commitment,
+                Some(&sealed.secret_public_key),
+            ) {
+                Err(_) => {}
+                Ok(inner) => prop_assert_eq!(inner, untampered),
+            }
+        }
+
+        /// A commitment that does not match the reconstructed payload is
+        /// refused. This is the check that lets anyone verify a reveal without
+        /// holding the recipient's key.
+        #[test]
+        fn a_wrong_commitment_is_rejected(
+            payload in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, guardian_count) in threshold_and_guardians(),
+            commitment: [u8; 32],
+        ) {
+            let (sealed, revealed, _) =
+                seal_and_reveal(&payload, threshold, guardian_count, threshold as usize);
+            prop_assume!(commitment != sealed.commitment);
+
+            prop_assert!(unseal_secret(
+                &revealed,
+                threshold,
+                &sealed.payload_ciphertext,
+                &commitment,
+                None,
+            ).is_err());
+        }
+
+        /// A reconstructed key that does not match the secret's published pk_s
+        /// is refused before decryption is attempted — the fault-attribution
+        /// path.
+        #[test]
+        fn a_wrong_secret_public_key_is_rejected(
+            payload in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, guardian_count) in threshold_and_guardians(),
+            expected: [u8; 32],
+        ) {
+            let (sealed, revealed, _) =
+                seal_and_reveal(&payload, threshold, guardian_count, threshold as usize);
+            prop_assume!(expected != sealed.secret_public_key);
+
+            prop_assert!(unseal_secret(
+                &revealed,
+                threshold,
+                &sealed.payload_ciphertext,
+                &sealed.commitment,
+                Some(&expected),
+            ).is_err());
+        }
+
+        /// Fewer than `threshold` reveals cannot unseal.
+        #[test]
+        fn a_sub_threshold_reveal_is_rejected(
+            payload in prop::collection::vec(any::<u8>(), 1..=64),
+            (threshold, guardian_count) in threshold_and_guardians(),
+        ) {
+            let (sealed, revealed, _) =
+                seal_and_reveal(&payload, threshold, guardian_count, threshold as usize - 1);
+
+            prop_assert!(unseal_secret(
+                &revealed,
+                threshold,
+                &sealed.payload_ciphertext,
+                &sealed.commitment,
+                Some(&sealed.secret_public_key),
+            ).is_err());
+        }
+
+        /// A well-formed envelope round-trips through encode and decode.
+        #[test]
+        fn key_share_envelopes_round_trip(id in 1u8..=255, data: [u8; 32]) {
+            let share = sss::Share { id, data: data.to_vec() };
+            let envelope = encode_key_share(&share).unwrap();
+            prop_assert_eq!(envelope.len(), KEY_SHARE_ENVELOPE_LEN);
+            prop_assert_eq!(decode_key_share(&envelope).unwrap(), share);
+        }
+
+        /// Arbitrary bytes into the envelope parser: accepted only at the exact
+        /// length and version, never panicking on anything else.
+        #[test]
+        fn decode_key_share_never_panics_on_arbitrary_input(
+            envelope in prop::collection::vec(any::<u8>(), 0..=80),
+        ) {
+            let decoded = decode_key_share(&envelope);
+            let well_formed = envelope.len() == KEY_SHARE_ENVELOPE_LEN
+                && envelope[0] == KEY_SHARE_ENVELOPE_VERSION;
+            prop_assert_eq!(decoded.is_ok(), well_formed);
+        }
+
+        /// Arbitrary envelopes and an arbitrary threshold into the reconstruction
+        /// helper. The outcome is uninteresting; that it returns is the point.
+        #[test]
+        fn combine_key_shares_never_panics_on_arbitrary_input(
+            envelopes in prop::collection::vec(
+                prop::collection::vec(any::<u8>(), 0..=40),
+                0..=12,
+            ),
+            threshold: u8,
+        ) {
+            let _ = combine_key_shares(&envelopes, threshold);
+        }
+
+        /// Every argument of `unseal_secret` arbitrary at once — the shape the
+        /// SDK faces when chain state is hostile.
+        #[test]
+        fn unseal_secret_never_panics_on_arbitrary_input(
+            envelopes in prop::collection::vec(
+                prop::collection::vec(any::<u8>(), 0..=40),
+                0..=12,
+            ),
+            threshold: u8,
+            payload_ciphertext in prop::collection::vec(any::<u8>(), 0..=160),
+            commitment: [u8; 32],
+            expected: Option<[u8; 32]>,
+        ) {
+            let result = unseal_secret(
+                &envelopes,
+                threshold,
+                &payload_ciphertext,
+                &commitment,
+                expected.as_ref(),
+            );
+            prop_assert!(result.is_err());
         }
     }
 }

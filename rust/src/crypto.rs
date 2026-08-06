@@ -169,6 +169,17 @@ pub fn encrypt_for_public_key(
     data: &[u8],
     public_key: &TimeflarePublicKey,
 ) -> Result<Vec<u8>, CryptoError> {
+    // An empty payload encrypts to a well-formed 60-byte envelope carrying no
+    // plaintext, which every layer above treats as a real secret: the chain
+    // stores it, guardians bond against it and a recipient waits out the timer
+    // for nothing. Refused here, at the same boundary and for the same reason
+    // as the Go implementation, so the two agree on what is encryptable.
+    if data.is_empty() {
+        return Err(CryptoError::InvalidInput(
+            "data to encrypt cannot be empty".to_string(),
+        ));
+    }
+
     // Generate ephemeral keypair for ECDH
     let mut rng = wasm_compatible_rng()?;
     let ephemeral_secret = StaticSecret::random_from_rng(&mut rng);
@@ -673,5 +684,206 @@ mod low_order_rejection {
             .decrypt(&forged)
             .expect_err("a small-order ephemeral must be refused");
         assert!(matches!(err, CryptoError::DecryptionFailed(_)));
+    }
+}
+
+/// Property and randomised-input tests for the envelope.
+///
+/// `decrypt` parses `ephemeral_pub(32) ‖ nonce(12) ‖ ct`, and every byte of it
+/// is attacker-controlled: the guardian daemon and the SDK both feed it bytes
+/// taken from chain state. What is asserted is that no input reaches a panic
+/// and no tampered input is accepted.
+///
+/// Case count is `PROPTEST_CASES` (default 256). `make fuzz` raises it.
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// 32B ephemeral public key + 12B nonce + 16B Poly1305 tag.
+    const MIN_ENVELOPE_LEN: usize = 60;
+
+    /// The one envelope bit a tamper cannot change the meaning of: bit 7 of
+    /// byte 31, the top bit of the ephemeral public key's u-coordinate.
+    ///
+    /// RFC 7748 §5 requires that bit to be masked off when a u-coordinate is
+    /// decoded, so two ephemeral keys differing only there are the same point
+    /// and yield the same shared secret. Flipping it leaves a decryptable
+    /// envelope that returns the original plaintext. Nothing is lost by it —
+    /// the payload is unchanged and the AEAD still covers everything else — but
+    /// it is why the tamper properties assert "never a different answer" rather
+    /// than "always an error".
+    const MASKED_U_COORDINATE_BIT: (usize, u32) = (31, 7);
+
+    /// An empty payload is refused, at every entry point that reaches
+    /// encryption. Both implementations of this primitive draw the line in the
+    /// same place; the corpus pins agreed outputs and so cannot pin a shared
+    /// rejection, which is why this is asserted here and in the Go suite rather
+    /// than as a vector.
+    #[test]
+    fn an_empty_payload_is_refused() {
+        let keypair = TimeflareKeypair::generate();
+
+        let err = encrypt_for_public_key(&[], &keypair.public_key())
+            .expect_err("an empty payload must be refused");
+        assert!(matches!(err, CryptoError::InvalidInput(_)));
+
+        // A single byte is the smallest thing that is accepted, so the boundary
+        // is exactly at zero rather than somewhere above it.
+        assert!(encrypt_for_public_key(b"x", &keypair.public_key()).is_ok());
+    }
+
+    #[test]
+    fn the_masked_u_coordinate_bit_does_not_change_the_plaintext() {
+        let plaintext = b"the launch codes are 0000";
+        let keypair = TimeflareKeypair::generate();
+        let mut envelope = encrypt_for_public_key(plaintext, &keypair.public_key()).unwrap();
+
+        let (byte, bit) = MASKED_U_COORDINATE_BIT;
+        envelope[byte] ^= 1 << bit;
+
+        assert_eq!(
+            keypair
+                .decrypt(&envelope)
+                .expect("the masked bit is ignored"),
+            plaintext,
+            "flipping the masked u-coordinate bit must not change the plaintext"
+        );
+    }
+
+    /// Every other bit of the ephemeral public key does break decryption, so
+    /// the inert set is exactly one bit wide.
+    #[test]
+    fn every_other_ephemeral_key_bit_breaks_decryption() {
+        let plaintext = b"the launch codes are 0000";
+        let keypair = TimeflareKeypair::generate();
+        let envelope = encrypt_for_public_key(plaintext, &keypair.public_key()).unwrap();
+
+        for byte in 0..32usize {
+            for bit in 0..8u32 {
+                if (byte, bit) == MASKED_U_COORDINATE_BIT {
+                    continue;
+                }
+                let mut tampered = envelope.clone();
+                tampered[byte] ^= 1 << bit;
+                assert!(
+                    keypair.decrypt(&tampered).is_err(),
+                    "flipping byte {} bit {} of the ephemeral key must break decryption",
+                    byte,
+                    bit
+                );
+            }
+        }
+    }
+
+    proptest! {
+        /// Arbitrary plaintext survives a round trip unchanged.
+        #[test]
+        fn encrypt_then_decrypt_is_the_identity(plaintext in prop::collection::vec(any::<u8>(), 1..=512)) {
+            let keypair = TimeflareKeypair::generate();
+            let ciphertext = encrypt_for_public_key(&plaintext, &keypair.public_key())
+                .expect("encryption to a generated key succeeds");
+            prop_assert_eq!(keypair.decrypt(&ciphertext).unwrap(), plaintext);
+        }
+
+        /// Encryption is randomised: the same plaintext under the same key
+        /// yields a different envelope every time, because both the ephemeral
+        /// key and the nonce are freshly drawn.
+        #[test]
+        fn encryption_is_randomised(plaintext in prop::collection::vec(any::<u8>(), 1..=128)) {
+            let keypair = TimeflareKeypair::generate();
+            let first = encrypt_for_public_key(&plaintext, &keypair.public_key()).unwrap();
+            let second = encrypt_for_public_key(&plaintext, &keypair.public_key()).unwrap();
+            prop_assert_ne!(first, second);
+        }
+
+        /// Flipping any single bit of a valid envelope — ephemeral key, nonce,
+        /// ciphertext or tag — never yields a *different* plaintext. Every bit
+        /// but the masked one breaks decryption outright; that one is inert,
+        /// for the reason given at `MASKED_U_COORDINATE_BIT`.
+        #[test]
+        fn no_single_bit_flip_yields_a_different_plaintext(
+            plaintext in prop::collection::vec(any::<u8>(), 1..=128),
+            byte_index: prop::sample::Index,
+            bit in 0u32..8,
+        ) {
+            let keypair = TimeflareKeypair::generate();
+            let mut ciphertext = encrypt_for_public_key(&plaintext, &keypair.public_key()).unwrap();
+
+            let index = byte_index.index(ciphertext.len());
+            ciphertext[index] ^= 1 << bit;
+
+            match keypair.decrypt(&ciphertext) {
+                Err(_) => {}
+                Ok(decrypted) => {
+                    prop_assert_eq!((index, bit), MASKED_U_COORDINATE_BIT);
+                    prop_assert_eq!(decrypted, plaintext);
+                }
+            }
+        }
+
+        /// Truncation is rejected at every length short of the full envelope.
+        #[test]
+        fn truncated_envelopes_are_rejected(
+            plaintext in prop::collection::vec(any::<u8>(), 1..=128),
+            cut: prop::sample::Index,
+        ) {
+            let keypair = TimeflareKeypair::generate();
+            let ciphertext = encrypt_for_public_key(&plaintext, &keypair.public_key()).unwrap();
+
+            let length = cut.index(ciphertext.len());
+            prop_assert!(keypair.decrypt(&ciphertext[..length]).is_err());
+        }
+
+        /// Trailing bytes are not ignored — the AEAD covers the whole tail.
+        #[test]
+        fn extended_envelopes_are_rejected(
+            plaintext in prop::collection::vec(any::<u8>(), 1..=128),
+            tail in prop::collection::vec(any::<u8>(), 1..=32),
+        ) {
+            let keypair = TimeflareKeypair::generate();
+            let mut ciphertext = encrypt_for_public_key(&plaintext, &keypair.public_key()).unwrap();
+            ciphertext.extend_from_slice(&tail);
+
+            prop_assert!(keypair.decrypt(&ciphertext).is_err());
+        }
+
+        /// Arbitrary bytes, at any length, are rejected rather than decrypted or
+        /// panicked on. Forging an envelope would mean producing a valid
+        /// Poly1305 tag under a key derived from an X25519 exchange, so an
+        /// unconditional rejection is the correct expectation here.
+        #[test]
+        fn arbitrary_bytes_are_rejected(envelope in prop::collection::vec(any::<u8>(), 0..=256)) {
+            let keypair = TimeflareKeypair::generate();
+            prop_assert!(keypair.decrypt(&envelope).is_err());
+        }
+
+        /// Anything shorter than a header cannot be mistaken for an envelope.
+        #[test]
+        fn undersized_input_is_rejected(short in prop::collection::vec(any::<u8>(), 0..MIN_ENVELOPE_LEN)) {
+            let keypair = TimeflareKeypair::generate();
+            prop_assert!(keypair.decrypt(&short).is_err());
+        }
+
+        /// The early guard the SDK calls agrees with the authoritative
+        /// rejection inside encryption, for arbitrary key bytes rather than
+        /// only the known small-order set.
+        #[test]
+        fn usability_guard_agrees_with_encryption(key: [u8; 32]) {
+            let usable = is_usable_x25519_public_key(&key);
+            let encrypted = encrypt_for_public_key(b"payload", &TimeflarePublicKey::from_bytes(key));
+            prop_assert_eq!(usable, encrypted.is_ok());
+        }
+
+        /// A keypair's bytes round-trip, and the derived public key is stable.
+        #[test]
+        fn keypair_bytes_round_trip(scalar: [u8; 32]) {
+            let keypair = TimeflareKeypair::from_bytes(scalar);
+            prop_assert_eq!(keypair.to_bytes(), scalar);
+            prop_assert_eq!(
+                keypair.public_key_bytes(),
+                TimeflareKeypair::from_bytes(scalar).public_key_bytes()
+            );
+        }
     }
 }

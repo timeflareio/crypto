@@ -35,6 +35,12 @@ console_error_panic_hook = { version = "0.1", optional = true }
 
 serde_bytes = "0.11.19"
 
+# Test-only. proptest drives the property and randomised-input suites; it
+# compiles for `cargo test` alone, so it reaches neither the WASM bundle nor the
+# UniFFI target and is not a cryptographic dependency under the T3 gate.
+[dev-dependencies]
+proptest = "1"
+
 [features]
 default = []
 console_error_panic_hook = ["dep:console_error_panic_hook"]

@@ -398,3 +398,152 @@ pub fn rebate_commitment(z: &[u8], collector: &[u8]) -> [u8; 32] {
     hasher.update(collector);
     hasher.finalize().into()
 }
+
+/// Property and randomised-input tests for hint scanning.
+///
+/// A scan runs over hints taken straight from chain state, so both `R` and the
+/// tag are attacker-chosen and a scan must survive a hostile feed without
+/// aborting: one poisoned hint must not stop the recipient finding the others.
+///
+/// Case count is `PROPTEST_CASES` (default 256). `make fuzz` raises it.
+#[cfg(test)]
+mod property_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// A hint derived toward a recipient is found by that recipient.
+        #[test]
+        fn derived_hints_are_detected_by_their_recipient(_seed: u8) {
+            let recipient = TimeflareKeypair::generate();
+            let hint = derive_detection_hint(&recipient.public_key_bytes())
+                .expect("a generated key is not small-order");
+
+            prop_assert!(scan_hint(
+                &recipient.to_bytes(),
+                &hint.ephemeral_pub,
+                &hint.tag,
+            ).unwrap());
+        }
+
+        /// A hint derived toward someone else is not.
+        #[test]
+        fn hints_are_not_detected_by_other_recipients(_seed: u8) {
+            let recipient = TimeflareKeypair::generate();
+            let stranger = TimeflareKeypair::generate();
+            let hint = derive_detection_hint(&recipient.public_key_bytes()).unwrap();
+
+            prop_assert!(!scan_hint(
+                &stranger.to_bytes(),
+                &hint.ephemeral_pub,
+                &hint.tag,
+            ).unwrap());
+        }
+
+        /// A tag of the wrong length is a non-match, not an error.
+        #[test]
+        fn wrong_length_tags_do_not_match(
+            tag in prop::collection::vec(any::<u8>(), 0..=40)
+                .prop_filter("tag must be the wrong length", |t| t.len() != DETECTION_TAG_LEN),
+        ) {
+            let recipient = TimeflareKeypair::generate();
+            let hint = derive_detection_hint(&recipient.public_key_bytes()).unwrap();
+
+            prop_assert!(!scan_hint(&recipient.to_bytes(), &hint.ephemeral_pub, &tag).unwrap());
+        }
+
+        /// Arbitrary hint bytes — any `R`, any tag, any scanning key — resolve to
+        /// a match or a non-match, never an error and never a panic. A scan over
+        /// a feed containing a poisoned hint must keep going.
+        #[test]
+        fn scanning_arbitrary_hints_never_fails(
+            private_key: [u8; 32],
+            ephemeral_pub: [u8; 32],
+            tag in prop::collection::vec(any::<u8>(), 0..=40),
+        ) {
+            prop_assert!(scan_hint(&private_key, &ephemeral_pub, &tag).is_ok());
+        }
+
+        /// Detection is deterministic: the same hint scanned twice agrees.
+        #[test]
+        fn scanning_is_deterministic(
+            private_key: [u8; 32],
+            ephemeral_pub: [u8; 32],
+            tag: [u8; DETECTION_TAG_LEN],
+        ) {
+            let first = scan_hint(&private_key, &ephemeral_pub, &tag).unwrap();
+            let second = scan_hint(&private_key, &ephemeral_pub, &tag).unwrap();
+            prop_assert_eq!(first, second);
+        }
+
+        /// The proof a recipient publishes is the value the scan matched on, so
+        /// a hint that scans positive always yields a usable proof.
+        #[test]
+        fn a_matching_hint_yields_a_proof(_seed: u8) {
+            let recipient = TimeflareKeypair::generate();
+            let hint = derive_detection_hint(&recipient.public_key_bytes()).unwrap();
+
+            let z = recipiency_proof(&recipient.to_bytes(), &hint.ephemeral_pub)
+                .expect("a contributory exchange yields a proof");
+            prop_assert_eq!(z.len(), 32);
+        }
+
+        /// Arbitrary inputs to the proof helper never panic; a small-order `R`
+        /// is refused rather than returning a value every recipient shares.
+        #[test]
+        fn recipiency_proof_never_panics_on_arbitrary_input(
+            private_key: [u8; 32],
+            ephemeral_pub: [u8; 32],
+        ) {
+            let _ = recipiency_proof(&private_key, &ephemeral_pub);
+        }
+
+        /// The commitment is a deterministic function of its two inputs, at any
+        /// input length.
+        #[test]
+        fn rebate_commitment_is_deterministic(
+            z in prop::collection::vec(any::<u8>(), 0..=64),
+            collector in prop::collection::vec(any::<u8>(), 0..=64),
+        ) {
+            prop_assert_eq!(rebate_commitment(&z, &collector), rebate_commitment(&z, &collector));
+        }
+
+        /// Changing either input changes the commitment.
+        #[test]
+        fn rebate_commitment_binds_both_inputs(
+            z: [u8; 32],
+            collector in prop::collection::vec(any::<u8>(), 1..=32),
+            other_z: [u8; 32],
+            other_collector in prop::collection::vec(any::<u8>(), 1..=32),
+        ) {
+            let base = rebate_commitment(&z, &collector);
+            if other_z != z {
+                prop_assert_ne!(rebate_commitment(&other_z, &collector), base);
+            }
+            if other_collector != collector {
+                prop_assert_ne!(rebate_commitment(&z, &other_collector), base);
+            }
+        }
+
+        /// The two inputs are concatenated without a length prefix, so the split
+        /// between them is not itself committed to.
+        ///
+        /// Every call site passes a 32-byte `z` straight from X25519 and a
+        /// fixed-length collector address, which is what makes the split
+        /// unambiguous in practice — the property is pinned here so that a
+        /// change to either length is a deliberate act rather than an accident.
+        #[test]
+        fn rebate_commitment_does_not_commit_to_the_input_split(
+            left in prop::collection::vec(any::<u8>(), 1..=32),
+            right in prop::collection::vec(any::<u8>(), 1..=32),
+        ) {
+            let mut joined = left.clone();
+            joined.extend_from_slice(&right);
+
+            prop_assert_eq!(
+                rebate_commitment(&joined, &[]),
+                rebate_commitment(&left, &right)
+            );
+        }
+    }
+}

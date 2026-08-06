@@ -131,6 +131,56 @@ dials, share bands, creation fees, wallet derivation). Those files are not
 mirrored here and nothing here asserts them: this repository defines primitives
 others depend on, and depends on none of them.
 
+## Security posture
+
+Two properties an auditor will ask about are not delivered by this code, and are
+recorded here so the position is a decision rather than an omission. Neither is a
+known vulnerability; both are limits worth stating plainly.
+
+**Secret material is not systematically erased from memory.** The X25519 secret
+key type zeroises on drop, so the per-secret private key `sk_s` is cleared once
+sealing returns. Nothing else is: a guardian's decrypted envelope, a
+reconstructed secret sitting in WASM linear memory, and the `Uint8Array`s the
+TypeScript SDK hands back all persist until the allocator reuses the pages. In a
+browser this is close to unavoidable — JavaScript exposes no way to guarantee a
+buffer is overwritten, garbage collection may copy a value before any wipe runs,
+and WASM linear memory is a plain `ArrayBuffer` the host may snapshot. Hardening
+the paths that *are* under this repository's control is deferred rather than
+refused; the trigger for doing it is an audit finding that names a reachable
+attacker, not a general wish for hygiene.
+
+**GF(256) arithmetic is not constant-time.** The Shamir implementation multiplies
+and divides through log/exp lookup tables, so operand values steer memory
+accesses and the timing is data-dependent — the classic table-lookup side
+channel. The accepted-risk argument is about who is positioned to measure it:
+splitting happens client-side on the machine that already holds the secret, and
+combining happens where a threshold of shares has already been gathered, so an
+attacker able to time these operations holds the material the channel would
+leak. That argument is about *this* protocol's deployment, not about the
+technique being safe; a future component that performed share arithmetic on
+input it did not already own would need this revisited before shipping.
+
+## Assurance
+
+Beyond the unit suites and the vector corpus, both implementations carry
+property-based and randomised-input tests. The Rust crate uses `proptest` to
+check the GF(256) field laws universally, the split→combine identity across
+arbitrary thresholds and share subsets, and the seal/unseal round trip under
+arbitrary tampering. The Go package uses native fuzzing (`go test -fuzz`) against
+the parsers the guardian daemon points at chain state.
+
+```bash
+make test    # both suites, plus every committed fuzz seed and regression case
+make fuzz    # search for new ones — FUZZTIME=5m PROPTEST_CASES=100000
+```
+
+`make fuzz` is a deliberate, unbounded run and is in neither `verify` nor `test`.
+Its output that matters is the corpus, not the run: crashes are committed as
+seeds under `go/testdata/fuzz/` and `rust/proptest-regressions/`, where `make
+test` replays them for good, offline and at no cost. There is no scheduled
+fuzzing job in CI by decision — a nightly run spends runner minutes indefinitely
+to rediscover what a committed seed already asserts.
+
 ## Documentation
 
 `docs/spec.md` in the chain repository specifies the protocol that consumes
