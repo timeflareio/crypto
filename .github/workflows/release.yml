@@ -24,19 +24,28 @@ jobs:
     name: Verify, build and publish
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      # Every action in this job is pinned by commit SHA rather than by tag:
+      # this is the job that builds the artefact consumers download, with
+      # contents: write, and a tag is a movable pointer in someone else's
+      # repository. Dependabot tracks the pins and keeps the version comments
+      # in step.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
       # rust/rust-toolchain.toml pins the exact toolchain; this step provides
-      # rustup so cargo can honour it.
-      - uses: dtolnay/rust-toolchain@stable
+      # rustup so cargo can honour it. The ref is a commit on the action's
+      # master branch (its tags name toolchains, not releases), so the
+      # toolchain is named by input rather than by ref.
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
       - name: Install wasm-pack
-        uses: taiki-e/install-action@v2.85.5
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: wasm-pack
 

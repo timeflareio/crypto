@@ -19,11 +19,26 @@ jobs:
     name: Workflow lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Pinned release asset, verified against that release's checksums file —
+      # the same trust model as the golangci-lint step below, and for the same
+      # reason: upstream's download script is fetched from its main branch, so
+      # what it runs can change without a commit here.
       - name: Run actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.9
         run: |
-          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          ./actionlint -color
+          set -euo pipefail
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tmp="$(mktemp -d)"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/${tarball}" "${base}/${tarball}"
+          curl -sSfL --retry 5 --retry-delay 2 --retry-all-errors \
+            -o "${tmp}/checksums.txt" "${base}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          ( cd "${tmp}" && grep " ${tarball}\$" checksums.txt | sha256sum -c - )
+          tar -xzf "${tmp}/${tarball}" -C "${tmp}" actionlint
+          "${tmp}/actionlint" -color
 
   # One job runs `make verify && make test` exactly as a developer does, so CI
   # and the local loop cannot drift. Both toolchains are needed because the two
@@ -33,9 +48,9 @@ jobs:
     name: Verify + test (Go + Rust)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
@@ -44,10 +59,14 @@ jobs:
       # one: the action sets `rustup default`, which a toolchain file outranks.
       # That file pins the version and declares rustfmt and clippy, so `make
       # verify` gates on the same toolchain locally and here. This step exists
-      # to put rustup on PATH and prime the cache.
-      - uses: dtolnay/rust-toolchain@stable
+      # to put rustup on PATH and prime the cache. The ref is a commit on the
+      # action's master branch (its tags name toolchains, not releases), so the
+      # toolchain is named by input rather than by ref.
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -111,18 +130,20 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
       - name: Audit Go dependencies
         env:
           GOTOOLCHAIN: auto
         run: make go-govulncheck
       - name: Install cargo-audit
-        uses: taiki-e/install-action@v2.85.5
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: cargo-audit
       - name: Audit Rust dependencies
