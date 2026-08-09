@@ -150,7 +150,7 @@ pub fn seal_secret(
         let envelope = encode_key_share(share)?;
         let guardian_key = TimeflarePublicKey::from_bytes(guardian.public_key);
         let encrypted_share = encrypt_for_public_key(&envelope, &guardian_key)?;
-        let share_hmac = generate_guardian_hmac(secret_id, &guardian.address, &envelope);
+        let share_hmac = generate_guardian_hmac(secret_id, &guardian.address, &envelope)?;
         key_shares.push(SealedKeyShare {
             guardian_address: guardian.address.clone(),
             encrypted_share,
@@ -278,7 +278,7 @@ mod tests {
             let envelope = kp.decrypt(&sealed.key_shares[i].encrypted_share).unwrap();
             assert_eq!(envelope.len(), KEY_SHARE_ENVELOPE_LEN);
             assert_eq!(envelope[0], KEY_SHARE_ENVELOPE_VERSION);
-            let hmac = generate_guardian_hmac(secret_id, &guardians[i].address, &envelope);
+            let hmac = generate_guardian_hmac(secret_id, &guardians[i].address, &envelope).unwrap();
             assert_eq!(hmac, sealed.key_shares[i].share_hmac);
             revealed.push(envelope);
         }
@@ -678,7 +678,8 @@ mod property_tests {
                 let envelope = kp.decrypt(&sealed.key_shares[i].encrypted_share).unwrap();
                 prop_assert_eq!(envelope.len(), KEY_SHARE_ENVELOPE_LEN);
                 prop_assert_eq!(envelope[0], KEY_SHARE_ENVELOPE_VERSION);
-                let hmac = generate_guardian_hmac(SECRET_ID, &guardians[i].address, &envelope);
+                let hmac =
+                    generate_guardian_hmac(SECRET_ID, &guardians[i].address, &envelope).unwrap();
                 prop_assert_eq!(&hmac, &sealed.key_shares[i].share_hmac);
             }
         }
