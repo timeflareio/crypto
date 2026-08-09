@@ -37,12 +37,33 @@ pub fn generate_random_bytes(length: usize) -> Result<Vec<u8>, CryptoError> {
     Ok(bytes)
 }
 
-/// Generate HMAC matching the guardian Go implementation exactly
+/// Generate HMAC matching the guardian Go implementation exactly — including
+/// what it rejects: an empty secret ID, guardian address or share payload is
+/// refused here for the same reason and at the same boundary as in
+/// crypto/hmac.go, so the two implementations agree on what is taggable. The
+/// corpus pins agreed outputs and so cannot pin a shared rejection; the empty
+/// bound is asserted by both suites instead.
 pub fn generate_guardian_hmac(
     secret_id: &str,
     guardian_address: &str,
     share_data: &[u8],
-) -> Vec<u8> {
+) -> Result<Vec<u8>, CryptoError> {
+    if secret_id.is_empty() {
+        return Err(CryptoError::InvalidInput(
+            "secret ID cannot be empty".to_string(),
+        ));
+    }
+    if guardian_address.is_empty() {
+        return Err(CryptoError::InvalidInput(
+            "guardian address cannot be empty".to_string(),
+        ));
+    }
+    if share_data.is_empty() {
+        return Err(CryptoError::InvalidInput(
+            "share data cannot be empty".to_string(),
+        ));
+    }
+
     // Step 1: Generate HMAC key (matching crypto/hmac.go)
     let mut key_hash = Sha256::new();
     key_hash.update(b"secrets"); // Module name
@@ -57,7 +78,7 @@ pub fn generate_guardian_hmac(
     mac.update(guardian_address.as_bytes());
     mac.update(secret_id.as_bytes());
 
-    mac.finalize().into_bytes().to_vec()
+    Ok(mac.finalize().into_bytes().to_vec())
 }
 
 /// Set up panic hook for better error messages in WASM
@@ -88,11 +109,32 @@ mod tests {
         let guardian_addr = "tmflr1guardian123";
         let secret_id = "secret-123";
 
-        let hmac1 = generate_guardian_hmac(secret_id, guardian_addr, share);
-        let hmac2 = generate_guardian_hmac(secret_id, guardian_addr, share);
+        let hmac1 = generate_guardian_hmac(secret_id, guardian_addr, share).unwrap();
+        let hmac2 = generate_guardian_hmac(secret_id, guardian_addr, share).unwrap();
 
         assert_eq!(hmac1, hmac2); // Should be deterministic
         assert_eq!(hmac1.len(), 32); // SHA256 output
+    }
+
+    /// The Go implementation refuses an empty secret ID, guardian address or
+    /// share payload (crypto/hmac.go); this side must draw the line in the
+    /// same place. The corpus cannot pin a rejection, so the bound is asserted
+    /// from both suites — the Go side's is FuzzGenerateHMACAgreesWithVerify's
+    /// empty seed.
+    #[test]
+    fn test_empty_inputs_are_refused() {
+        for (secret_id, guardian_address, share_data) in [
+            ("", "tmflr1guardian123", b"share".as_slice()),
+            ("secret-123", "", b"share".as_slice()),
+            ("secret-123", "tmflr1guardian123", b"".as_slice()),
+        ] {
+            let err = generate_guardian_hmac(secret_id, guardian_address, share_data)
+                .expect_err("an empty input must be refused");
+            assert!(matches!(err, CryptoError::InvalidInput(_)));
+        }
+
+        // The boundary sits exactly at empty: one byte of everything is taggable.
+        assert!(generate_guardian_hmac("s", "g", b"x").is_ok());
     }
 
     #[test]
@@ -112,12 +154,12 @@ mod tests {
         let guardian_address = "tmflr1test";
         let share_data = vec![1, 2, 3, 4];
 
-        let hmac = generate_guardian_hmac(secret_id, guardian_address, &share_data);
+        let hmac = generate_guardian_hmac(secret_id, guardian_address, &share_data).unwrap();
 
         assert_eq!(hmac.len(), 32); // SHA256 HMAC length
 
         // Test deterministic behavior
-        let hmac2 = generate_guardian_hmac(secret_id, guardian_address, &share_data);
+        let hmac2 = generate_guardian_hmac(secret_id, guardian_address, &share_data).unwrap();
         assert_eq!(hmac, hmac2);
     }
 
@@ -146,7 +188,8 @@ mod tests {
             let share_data = hex::decode(&v.share_data_hex).expect("bad share hex");
             let expected = hex::decode(&v.expected_hmac_hex).expect("bad hmac hex");
 
-            let got = generate_guardian_hmac(&v.secret_id, &v.guardian_address, &share_data);
+            let got = generate_guardian_hmac(&v.secret_id, &v.guardian_address, &share_data)
+                .expect("a pinned vector's inputs are taggable");
             assert_eq!(
                 got, expected,
                 "HMAC drifted from pinned vector '{}' — Go and Rust no longer agree",

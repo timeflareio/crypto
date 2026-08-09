@@ -229,14 +229,17 @@ pub fn bytes_to_hex(data: &[u8]) -> String {
     hex::encode(data)
 }
 
-/// Generate HMAC for guardian share validation (standalone function)
+/// Generate HMAC for guardian share validation (standalone function).
+/// An empty secret ID, guardian address or share payload is refused, exactly
+/// as the Go implementation the chain runs refuses it.
 #[wasm_bindgen]
 pub fn generate_guardian_hmac(
     secret_id: &str,
     guardian_address: &str,
     share_data: &[u8],
-) -> Vec<u8> {
+) -> Result<Vec<u8>, JsValue> {
     utils::generate_guardian_hmac(secret_id, guardian_address, share_data)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 // === KEY-SHARE SEALING (see rust/src/seal.rs) ===

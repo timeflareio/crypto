@@ -166,12 +166,10 @@ pub fn combine_shares(shares: &[Share], threshold: u8) -> Result<Vec<u8>, SssErr
     // Validate threshold bounds
     validate_threshold_bounds(threshold)?;
 
-    // Handle empty shares case first
-    if shares.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // Validate we have enough shares
+    // Validate we have enough shares. Zero shares is the degenerate case of
+    // the same rule: the minimum threshold is 2, so an empty slice can never
+    // reconstruct anything and must fail the same way one share does — a
+    // caller treating Ok as success must never receive an empty "secret".
     if shares.len() < threshold as usize {
         return Err(SssError::InsufficientShares {
             needed: threshold,
@@ -638,6 +636,22 @@ mod tests {
         // Try with too few shares
         let result = combine_shares(&shares[..2], threshold);
         assert!(matches!(result, Err(SssError::InsufficientShares { .. })));
+    }
+
+    /// Zero shares is refused like any other sub-threshold count, rather than
+    /// "reconstructing" an empty secret. The SDK reaches this path directly
+    /// through the reconstruct_secret WASM facade, where an Ok(empty) would
+    /// read as a successful reconstruction.
+    #[test]
+    fn test_zero_shares_rejected() {
+        let result = combine_shares(&[], 3);
+        match result {
+            Err(SssError::InsufficientShares { needed, provided }) => {
+                assert_eq!(needed, 3);
+                assert_eq!(provided, 0);
+            }
+            other => panic!("expected InsufficientShares, got: {:?}", other),
+        }
     }
 
     #[test]

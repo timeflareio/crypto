@@ -179,6 +179,33 @@ func TestGenerateVectors(t *testing.T) {
 				return b
 			}(),
 		},
+		{
+			name:            "share-id-255-all-zero-share",
+			secretID:        "9f2c1a34-0000-4000-8000-0000000000ff",
+			guardianAddress: "tmflr1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu",
+			shareData:       append([]byte{0x01, 0xFF}, make([]byte, 32)...),
+		},
+		{
+			// Identifiers are hashed as raw bytes, so a multi-byte UTF-8
+			// secret ID pins the string handling of every implementation to
+			// the same encoding.
+			name:            "multibyte-utf8-secret-id",
+			secretID:        "sécrét-⏰-2026",
+			guardianAddress: "tmflr1utf8guardian",
+			shareData:       bytes.Repeat([]byte{0x42}, 3),
+		},
+		{
+			name:            "64B-share-long-address",
+			secretID:        "ffffffff-ffff-4fff-8fff-ffffffffffff",
+			guardianAddress: "tmflr1longaddressvariant0000000000000000000000000000000000000000",
+			shareData: func() []byte {
+				b := make([]byte, 64)
+				for i := range b {
+					b[i] = byte(i * 5)
+				}
+				return b
+			}(),
+		},
 	}
 	var hmacVectors []hmacVector
 	for _, in := range hmacInputs {
@@ -236,6 +263,50 @@ func TestGenerateVectors(t *testing.T) {
 				return b
 			}(),
 		},
+		{
+			// Both extremes at once: a nonce and plaintext of all zeros are
+			// legitimate inputs and must not be special-cased anywhere.
+			name:          "all-zero-nonce-and-plaintext",
+			recipientPriv: fixed(0x05),
+			ephemeral:     fixed(0x0A),
+			nonce:         make([]byte, 12),
+			plaintext:     make([]byte, 32),
+		},
+		{
+			name:          "max-nonce",
+			recipientPriv: fixed(0x66),
+			ephemeral:     fixed(0x99),
+			nonce:         bytes.Repeat([]byte{0xFF}, 12),
+			plaintext: func() []byte {
+				b := make([]byte, 33)
+				for i := range b {
+					b[i] = byte(i * 7)
+				}
+				return b
+			}(),
+		},
+		{
+			// 94 bytes is an encrypted key-share envelope (34B plaintext plus
+			// the 60B envelope overhead) — the size the outer layer of a seal
+			// encrypts per guardian.
+			name:          "94B-encrypted-envelope-payload",
+			recipientPriv: fixed(0x11),
+			ephemeral:     fixed(0x22),
+			nonce: func() []byte {
+				n := make([]byte, 12)
+				for i := range n {
+					n[i] = byte(0x30 + i)
+				}
+				return n
+			}(),
+			plaintext: func() []byte {
+				b := make([]byte, 94)
+				for i := range b {
+					b[i] = byte(255 - i)
+				}
+				return b
+			}(),
+		},
 	}
 	var encVectors []encryptionVector
 	for _, in := range encInputs {
@@ -258,6 +329,93 @@ func TestGenerateVectors(t *testing.T) {
 		})
 	}
 	writeVectors(t, "encryption.json", encVectors)
+
+	// --- Detection-hint and rebate-commitment vectors ---
+	//
+	// One (recipient, ephemeral) pair pins both primitives: the recipiency
+	// proof IS the shared value the hint tag derives from, so the two corpora
+	// are generated from shared inputs, exactly as the protocol relates them.
+	// The first case reproduces the original normative vector byte-for-byte —
+	// vectors are append-only, so its inputs must never change.
+	derivedPub := func(scalar [32]byte) []byte {
+		pub, err := DerivePublicKey(scalar)
+		if err != nil {
+			t.Fatalf("DerivePublicKey failed: %v", err)
+		}
+		return pub[:]
+	}
+	hintInputs := []struct {
+		name          string
+		recipientPriv [32]byte
+		ephemeralPub  []byte
+		collector     []byte
+	}{
+		{
+			name:          "normative-v1-vector",
+			recipientPriv: fixed(0x01),
+			ephemeralPub:  mustHex(t, "605a725d2a4adfeeb1a29e17edd621c1b7593ee8cdbc44ac6c4ab6e2f805d23c"),
+			collector:     mustHex(t, "1f2e3d4c5b6a798807162534435261708f9eadbc"),
+		},
+		{
+			// A 32-byte collector: module accounts are 32 bytes, and the
+			// commitment must bind them exactly as it binds a 20-byte account.
+			name:          "32B-module-account-collector",
+			recipientPriv: fixed(0xF0),
+			ephemeralPub:  derivedPub(fixed(0x2A)),
+			collector: func() []byte {
+				b := fixed(0xA0)
+				return b[:]
+			}(),
+		},
+		{
+			name:          "leading-zero-collector",
+			recipientPriv: fixed(0x21),
+			ephemeralPub:  derivedPub(fixed(0x9C)),
+			collector: func() []byte {
+				b := make([]byte, 20)
+				for i := 1; i < len(b); i++ {
+					b[i] = byte(i * 11)
+				}
+				return b
+			}(),
+		},
+		{
+			name:          "distinct-pair",
+			recipientPriv: fixed(0x7F),
+			ephemeralPub:  derivedPub(fixed(0x03)),
+			collector: func() []byte {
+				b := make([]byte, 20)
+				for i := range b {
+					b[i] = byte(0x51 + i*3)
+				}
+				return b
+			}(),
+		},
+	}
+	var hintVectors []detectionHintVector
+	var rebateVectors []rebateCommitmentVector
+	for _, in := range hintInputs {
+		shared, err := curve25519.X25519(in.recipientPriv[:], in.ephemeralPub)
+		if err != nil {
+			t.Fatalf("X25519 failed for %s: %v", in.name, err)
+		}
+		hintVectors = append(hintVectors, detectionHintVector{
+			Name:                in.name,
+			RecipientPrivateHex: hex.EncodeToString(in.recipientPriv[:]),
+			EphemeralPublicHex:  hex.EncodeToString(in.ephemeralPub),
+			TagHex:              hex.EncodeToString(DetectionTag(shared)),
+		})
+		rebateVectors = append(rebateVectors, rebateCommitmentVector{
+			Name:                in.name,
+			RecipientPrivateHex: hex.EncodeToString(in.recipientPriv[:]),
+			EphemeralPublicHex:  hex.EncodeToString(in.ephemeralPub),
+			ProofHex:            hex.EncodeToString(shared),
+			CollectorAddressHex: hex.EncodeToString(in.collector),
+			CommitmentHex:       hex.EncodeToString(RebateCommitment(shared, in.collector)),
+		})
+	}
+	writeVectors(t, "detection_hint.json", hintVectors)
+	writeVectors(t, "rebate_commitment.json", rebateVectors)
 }
 
 func writeVectors(t *testing.T, name string, v any) {

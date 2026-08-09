@@ -1,10 +1,34 @@
 [
   {
-    "collector_address_hex": "1f2e3d4c5b6a798807162534435261708f9eadbc",
-    "commitment_hex": "e4857b09b2ac7743691ea289465b0593a9de2855aae9af668c94954de4c793dc",
-    "ephemeral_public_hex": "605a725d2a4adfeeb1a29e17edd621c1b7593ee8cdbc44ac6c4ab6e2f805d23c",
     "name": "normative-v1-vector",
+    "recipient_private_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+    "ephemeral_public_hex": "605a725d2a4adfeeb1a29e17edd621c1b7593ee8cdbc44ac6c4ab6e2f805d23c",
     "proof_hex": "caa14fedd7bf6bb2504b5c4df39c84b9c8e6848b6e06d9d0fbbc5eabcaaa1759",
-    "recipient_private_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+    "collector_address_hex": "1f2e3d4c5b6a798807162534435261708f9eadbc",
+    "commitment_hex": "e4857b09b2ac7743691ea289465b0593a9de2855aae9af668c94954de4c793dc"
+  },
+  {
+    "name": "32B-module-account-collector",
+    "recipient_private_hex": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f",
+    "ephemeral_public_hex": "7f888c953394d5839fa2f5d609e30c8de06c73abd5aaa0c4ffb5d0787836a154",
+    "proof_hex": "f38a79991f05fc43ef612f58ff1f63d11def8a16eafe2ba8605451dfd3255779",
+    "collector_address_hex": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+    "commitment_hex": "028ca65861c9df6cb72fd9694f5e567a1d5a406c882f77e4d9f78873b626c7fc"
+  },
+  {
+    "name": "leading-zero-collector",
+    "recipient_private_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40",
+    "ephemeral_public_hex": "b82d0d90fdc447b47794edd1aa141b46fdf0cd19841920b8ee30c099a061863e",
+    "proof_hex": "735d9baadacc1c69bfbf1c4f94314ffee1e23b3cfaced712673a02a5b22d2a36",
+    "collector_address_hex": "000b16212c37424d58636e79848f9aa5b0bbc6d1",
+    "commitment_hex": "4113ecde73995ff5900e7f5143e04773f3f763bdad9ae9e613c831f4fff6fe0b"
+  },
+  {
+    "name": "distinct-pair",
+    "recipient_private_hex": "7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e",
+    "ephemeral_public_hex": "909705b0e7d1817db56cdcb89ba2fabad3e9a01b2c23bc73e3ec9d9a2ff9b827",
+    "proof_hex": "011517c7e2014c9bd538e5b0cc1c1d1d697a032259dc83cd286935e888726f61",
+    "collector_address_hex": "5154575a5d606366696c6f7275787b7e8184878a",
+    "commitment_hex": "82bac045ee7aa95b69337e676672945edab92d881aa4aaff59f42a3e36c0cca1"
   }
 ]
