@@ -4,5 +4,23 @@
     "recipient_private_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
     "ephemeral_public_hex": "605a725d2a4adfeeb1a29e17edd621c1b7593ee8cdbc44ac6c4ab6e2f805d23c",
     "tag_hex": "2c5fe1cf67b6892c"
+  },
+  {
+    "name": "32B-module-account-collector",
+    "recipient_private_hex": "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f",
+    "ephemeral_public_hex": "7f888c953394d5839fa2f5d609e30c8de06c73abd5aaa0c4ffb5d0787836a154",
+    "tag_hex": "60463102f78c0b19"
+  },
+  {
+    "name": "leading-zero-collector",
+    "recipient_private_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40",
+    "ephemeral_public_hex": "b82d0d90fdc447b47794edd1aa141b46fdf0cd19841920b8ee30c099a061863e",
+    "tag_hex": "0dfe90b6168a02bd"
+  },
+  {
+    "name": "distinct-pair",
+    "recipient_private_hex": "7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e",
+    "ephemeral_public_hex": "909705b0e7d1817db56cdcb89ba2fabad3e9a01b2c23bc73e3ec9d9a2ff9b827",
+    "tag_hex": "f49cb4868987ca93"
   }
 ]
